@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import functools
 import os
 import sys
@@ -39,7 +40,7 @@ from typing import cast, ClassVar, Dict, List, override, Tuple
 VARIABLE_NAMES = 'abcdefghijklmnopqrstuvwxyz'
 
 
-class Naming: # pylint: disable=too-few-public-methods
+class Naming:
   """This is an object encapsulating the predictable generation of distinct
   variable names."""
   def __init__(self):
@@ -50,13 +51,23 @@ class Naming: # pylint: disable=too-few-public-methods
     """Get the next variable name."""
     if v.id not in self.known:
       assert self.next in VARIABLE_NAMES, 'too many variables'
-      self.known[v.id] = self.next
       try:
+        self.known[v.id] = self.next
         self.next = VARIABLE_NAMES[VARIABLE_NAMES.index(self.next) + 1]
       except IndexError:
         # set to an invalid value
         self.next = '_'
     return self.known[v.id]
+
+  def contains(self, v: Var):
+    """Return true if given id is known."""
+    return v.id in self.known
+
+  def add(self, other: Naming) -> None:
+    if other.known:
+      self.next = VARIABLE_NAMES[max(VARIABLE_NAMES.index(self.next), VARIABLE_NAMES.index(other.next))]
+      assert not set(self.known.keys()) & set(other.known.keys())
+      self.known = self.known | other.known
 
 
 # List of combinators, mostly taken from
@@ -254,9 +265,13 @@ class Lambda(Obj):
 
   @override
   def fmt(self, varmap: Naming) -> str:
-    # It is important to process the params first to ensure correct naming of parameter variables
-    paramstr = ''.join([a.fmt(varmap) for a in self.params])
-    return Lambda.known_name(f'(λ{paramstr}.{remove_braces(self.code.fmt(varmap))})')
+    # It is important to process the params first to ensure correct naming of parameter variables.
+    # Assign new names to the parameter variables
+    nvarmap = Naming()
+    paramstr = ''.join([a.fmt(nvarmap) for a in self.params])
+    varmap.add(nvarmap)
+    res = Lambda.known_name(f'(λ{paramstr}.{remove_braces(self.code.fmt(varmap))})')
+    return res
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -327,9 +342,7 @@ def parse_paren(s: str, ctx: Dict[str, Var]) -> Tuple[Obj, str]:
       raise SyntaxError('incomplete parenthesis')
     if s[end] == ')':
       if depth == 0:
-        res, ss = parse_top(s[start:end], ctx)
-        if ss:
-          raise SyntaxError(f'cannot parse {s[start:end]}')
+        res = parse_top(s[start:end], ctx)
         return res, s[end + 1:]
       depth -= 1
     if s[end] == '(':
@@ -346,12 +359,13 @@ def get_constant(s: str) -> Tuple[Obj, str]:
   i = 0
   while i < len(s) and s[i] != ')' and s[i] != '(' and s[i] != '.' and not s[i].isspace() and s[i] != 'λ':
     i += 1
-  if s[:i] in KNOWN_COMBINATORS:
-    e, ss = parse_top(KNOWN_COMBINATORS[s[:i]], {})
-    if ss:
-      raise SyntaxError(f'cannot parse {KNOWN_COMBINATORS[s[:i]]}')
-  else:
-    e = Constant(s[:i])
+  # i is now the maximum length of the constant.  Look for the maximum length known combinator.
+  e = Constant(s[:i])
+  for j in range(i, 0, -1):
+    if s[:j] in KNOWN_COMBINATORS:
+      e = parse_top(KNOWN_COMBINATORS[s[:j]], {})
+      i = j
+      break
   return e, s[i:].lstrip()
 
 
@@ -369,7 +383,7 @@ def parse_one(s: str, ctx: Dict[str, Var]) -> Tuple[Obj, str]:
     case c if c.isalpha():
       return get_constant(s)
     case _:
-      raise SyntaxError(f'cannot parse "{s}"')
+      raise SyntaxError(f'cannot parse {s}')
 
 
 def newlambda(params: List[Var], code: Obj) -> Obj:
@@ -377,8 +391,13 @@ def newlambda(params: List[Var], code: Obj) -> Obj:
   But the function also performs η-reduction, i.e., it returns just the function
   expression (first of the application values) in case the resulting lambda would
   just apply the required parameter to the application value in order."""
-  if isinstance(code, Application) and len(params) + 1 == len(code.code) and params == code.code[1:] and all(not code.code[0].is_free(e) for e in params):
-    return code.code[0]
+  if isinstance(code, Application) and len(params) < len(code.code):
+    ncode = len(code.code) - len(params)
+    if params == code.code[ncode:] and all(not c.is_free(e) for e in params for c in code.code[:ncode]):
+      if ncode == 1:
+        return code.code[0]
+      else:
+        return Application(code.code[:ncode])
   return Lambda(params, code)
 
 
@@ -386,16 +405,24 @@ def apply(li: List[Obj]) -> Obj:
   """Create an application expression given the list of objects.  If only a
   singular expression is given it is returned, no need to wrap it into an
   application expression."""
-  if len(li) < 2:
-    res = li[0] if li else Empty()
-  else:
-    res = Application(li).beta()
+  match len(li):
+    case 0:
+      res = Empty()
+    case 1:
+      res = li[0]
+    case _:
+      try:
+        if args.tracing:
+          print(f'before beta {str(Application(li))}')
+        res = Application(li).beta()
+      except RecursionError:
+        res = Application(li)
   if args.tracing:
     print(f'apply {' '.join([str(e) for e in li])} -> {str(res)}')
   return res
 
 
-def parse_top(s: str, ctx: Dict[str, Var]) -> Tuple[Obj, str]:
+def parse_top(s: str, ctx: Dict[str, Var]) -> Obj:
   """Parse a string to a lambda expression, taking one part at a time
   an creating an application expression from the parts.  Return the graph
   representation and the remainder of the string not part of the just
@@ -405,19 +432,18 @@ def parse_top(s: str, ctx: Dict[str, Var]) -> Tuple[Obj, str]:
   while s:
     e, s = parse_one(s, ctx)
     res.append(e)
-    s = s.strip()
-  return apply(res), s
+    s = s.lstrip()
+  if args.tracing:
+    print(f'parse_top res={[str(r) for r in res]}')
+  return apply(res)
 
 
 def from_string(s: str) -> Obj:
   """Parse a string to a lambda expression, taking one part at a time
-  an creating an application expression from the parts.  Return the graph
+  and creating an application expression from the parts.  Return the graph
   representation.  In case not all of the expression is parsed raise a
   syntax error exception."""
-  expr, ss = parse_top(s, {})
-  if ss:
-    raise SyntaxError(f'cannot parse {s}: left over {ss}')
-  return expr
+  return parse_top(s, {})
 
 
 def to_string(expr: Obj) -> str:
@@ -437,7 +463,7 @@ def handle(al: List[str], echo: bool) -> int:
     except SyntaxError as e:
       print(f'eval("{a}") failed: {e.args[0]}')
       ec = 1
-    print('\u2501' * os.get_terminal_size()[0])
+    print('\u2501' * (os.get_terminal_size()[0] if sys.stdout.isatty() else 72))
   return ec
 
 
@@ -505,9 +531,9 @@ def check() -> int:
     ('B(B W)', 'W**'),
     ('B C*', 'C**'),
     ('B(B B B)(B(B B B))', 'Ê'),
-    ('λabcd.MMM abcd', 'MMM'),
-    ('λabcd.MMM abdc', 'λabcd.MMM abdc'),
-    ('λabcd.MMM abc', 'λabcd.MMM abc'),
+    ('λabcd.MMMabcd', 'MMM'),
+    ('λabcd.MMMabdc', 'λabcd.MMMabdc'),
+    ('λabcd.MMMabc', 'λabcd.MMMabc'),
   ]
   ec = 0
   for testinput, expected in checks:
