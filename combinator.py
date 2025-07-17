@@ -26,7 +26,7 @@ import argparse
 import functools
 import os
 import sys
-from typing import cast, ClassVar, Dict, List, override, Optional, Tuple
+from typing import cast, ClassVar, Dict, List, override, Optional, Set, Tuple
 
 from colored import Fore, Style
 
@@ -44,9 +44,12 @@ VARIABLE_NAMES = 'abcdefghijklmnopqrstuvwxyz'
 class Naming:
   """This is an object encapsulating the predictable generation of distinct
   variable names."""
-  def __init__(self):
+  def __init__(self, avoid: Set[str]):
     self.next = VARIABLE_NAMES[0]
     self.known = {}
+    self.avoid = avoid
+    if self.next in self.avoid:
+      self.next_var()
 
   def get(self, v: Var) -> str:
     """Get the next variable name."""
@@ -54,7 +57,7 @@ class Naming:
       assert self.next in VARIABLE_NAMES, 'too many variables'
       try:
         self.known[v.id] = self.next
-        self.next = VARIABLE_NAMES[VARIABLE_NAMES.index(self.next) + 1]
+        self.next_var()
       except IndexError:
         # set to an invalid value
         self.next = '_'
@@ -66,10 +69,18 @@ class Naming:
 
   def add(self, other: Naming) -> None:
     """Add definitions from other variable set to own."""
+    assert self.avoid == other.avoid, "avoid sets must be equal"
     if other.known:
       self.next = VARIABLE_NAMES[max(VARIABLE_NAMES.index(self.next), VARIABLE_NAMES.index(other.next))]
       assert not set(self.known.keys()) & set(other.known.keys())
       self.known = self.known | other.known
+
+  def next_var(self) -> None:
+      while True:
+        idx = VARIABLE_NAMES.index(self.next) + 1
+        self.next = VARIABLE_NAMES[idx] if idx < len(VARIABLE_NAMES) else ''
+        if self.next not in self.avoid:
+            return
 
 
 # List of combinators, mostly taken from
@@ -157,12 +168,16 @@ class Obj:
     """Determine whether the expression matches OTHER considering variable renaming in VAR_MAP."""
     return self == other
 
+  def collect_free_vars(self) -> Set[str]:
+    return set()
+
 
 class Var(Obj):
   """Object to represent a variable in the lambda expression graph.  This implements
   the de Bruijn notation by representing each new variable with a unique number."""
   varcnt: ClassVar[int] = 1
   color: str = Fore.rgb(242, 185, 45)
+  color_free: str = Fore.rgb(255, 64, 23)
 
   def __init__(self, freename: Optional[str] = None):
     self.id = Var.varcnt
@@ -182,8 +197,7 @@ class Var(Obj):
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
     res = self.freename or varmap.get(self)
-    # return f'{Var.color}{res}{Style.reset}' if highlight else res
-    return f'{Var.color}{res}{Style.reset}' if highlight else res
+    return f'{Var.color_free if self.freename else Var.color}{res}{Style.reset}' if highlight else res
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -192,6 +206,10 @@ class Var(Obj):
   @override
   def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
     return isinstance(other, Var) and (self.id == other.id or var_map.get(self) == other)
+
+  @override
+  def collect_free_vars(self) -> Set[str]:
+    return set(self.freename) if self.freename else set()
 
 
 class Empty(Obj):
@@ -277,6 +295,10 @@ class Application(Obj):
   def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
     return isinstance(other, Application) and len(self.code) == len(other.code) and all(a.rmatch(b, var_map) for a, b in zip(self.code, other.code))
 
+  @override
+  def collect_free_vars(self) -> Set[str]:
+    return set().union(*[e.collect_free_vars() for e in self.code])
+
   def beta(self) -> Obj:
     """Perform beta reduction on the given application.  This is called on a freshly
     created object but the reduction cannot be performed in the constructor because
@@ -316,7 +338,7 @@ class Lambda(Obj):
   def fmt(self, varmap: Naming, highlight: bool) -> str:
     # It is important to process the params first to ensure correct naming of parameter variables.
     # Assign new names to the parameter variables
-    nvarmap = Naming()
+    nvarmap = Naming(varmap.avoid)
     paramstr = ''.join([a.fmt(nvarmap, highlight) for a in self.params])
     varmap.add(nvarmap)
     la = f'{Lambda.color}λ{Style.reset}' if highlight else 'λ'
@@ -354,6 +376,10 @@ class Lambda(Obj):
       return False
     param_map = {k: v for k, v in zip(self.params, c.params)}
     return self.rmatch(c, param_map)
+
+  @override
+  def collect_free_vars(self) -> Set[str]:
+    return self.code.collect_free_vars()
 
 
 def parse_lambda(s: str, ctx: Dict[str, Var]) -> Tuple[Obj, str]:
@@ -508,7 +534,7 @@ def from_string(s: str) -> Obj:
 
 def to_string(expr: Obj, highlight: bool = False) -> str:
   """Return a string representation for the lambda expression graph."""
-  return remove_braces(expr.recombine().fmt(Naming(), highlight)).rstrip()
+  return remove_braces(expr.recombine().fmt(Naming(expr.collect_free_vars()), highlight)).rstrip()
 
 
 def handle(al: List[str], echo: bool, is_terminal: bool = False) -> int:
