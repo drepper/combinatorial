@@ -28,6 +28,8 @@ import os
 import sys
 from typing import cast, ClassVar, Dict, List, override, Optional, Tuple
 
+from colored import Fore, Style
+
 
 # These are the characters accepted and used s variable names.  The list
 # could be extended here and everything else should just work.  But it
@@ -134,7 +136,7 @@ class Obj:
   def __str__(self) -> str:
     raise NotImplementedError('__str__ called for Obj')
 
-  def fmt(self, varmap: Naming) -> str:
+  def fmt(self, varmap: Naming, highlight: bool) -> str:
     """Format an expression as a string.  This pure virtual version must never
     be called."""
     raise NotImplementedError('fmt called for Obj')
@@ -160,6 +162,7 @@ class Var(Obj):
   """Object to represent a variable in the lambda expression graph.  This implements
   the de Bruijn notation by representing each new variable with a unique number."""
   varcnt: ClassVar[int] = 1
+  color: str = Fore.rgb(242, 185, 45)
 
   def __init__(self, freename: Optional[str] = None):
     self.id = Var.varcnt
@@ -177,8 +180,10 @@ class Var(Obj):
     return f'{{var {self.id}}}'
 
   @override
-  def fmt(self, varmap: Naming) -> str:
-    return self.freename or varmap.get(self)
+  def fmt(self, varmap: Naming, highlight: bool) -> str:
+    res = self.freename or varmap.get(self)
+    # return f'{Var.color}{res}{Style.reset}' if highlight else res
+    return f'{Var.color}{res}{Style.reset}' if highlight else res
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -196,7 +201,7 @@ class Empty(Obj):
     return '{}'
 
   @override
-  def fmt(self, varmap: Naming) -> str:
+  def fmt(self, varmap: Naming, highlight: bool) -> str:
     # This is a filler.  An object of this type should never really be used.
     return '○'
 
@@ -211,13 +216,15 @@ class Constant(Obj):
     return f'{{const {self.name}}}'
 
   @override
-  def fmt(self, varmap: Naming) -> str:
+  def fmt(self, varmap: Naming, highlight: bool) -> str:
     return f'{self.name} '
 
 
 
 class Combinator(Obj):
   """Object to represent a recombined combinator."""
+  color: str = Fore.rgb(255, 0, 163)
+
   def __init__(self, combinator: str):
     self.combinator = combinator
 
@@ -230,8 +237,8 @@ class Combinator(Obj):
     return self.combinator
 
   @override
-  def fmt(self, varmap: Naming) -> str:
-    return self.combinator
+  def fmt(self, varmap: Naming, highlight: bool) -> str:
+    return f'{Combinator.color}{self.combinator}{Style.reset}' if highlight else self.combinator
 
 
 class Application(Obj):
@@ -251,8 +258,8 @@ class Application(Obj):
     return f'{{App {' '.join([str(a) for a in self.code])}}}'
 
   @override
-  def fmt(self, varmap: Naming) -> str:
-    return f'({''.join([a.fmt(varmap) for a in self.code]).rstrip()})'
+  def fmt(self, varmap: Naming, highlight: bool) -> str:
+    return f'({''.join([a.fmt(varmap, highlight) for a in self.code]).rstrip()})'
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -285,6 +292,8 @@ class Application(Obj):
 
 class Lambda(Obj):
   """Object to represent a lambda expression in the lambda expression graph."""
+  color: str = Fore.rgb(45, 135, 242)
+
   def __init__(self, params: List[Var], code: Obj):
     if not params:
       raise SyntaxError('lambda parameter list cannot be empty')
@@ -304,13 +313,14 @@ class Lambda(Obj):
     return f'{{lambda {' '.join([str(a) for a in self.params])}.{str(self.code)}}}'
 
   @override
-  def fmt(self, varmap: Naming) -> str:
+  def fmt(self, varmap: Naming, highlight: bool) -> str:
     # It is important to process the params first to ensure correct naming of parameter variables.
     # Assign new names to the parameter variables
     nvarmap = Naming()
-    paramstr = ''.join([a.fmt(nvarmap) for a in self.params])
+    paramstr = ''.join([a.fmt(nvarmap, highlight) for a in self.params])
     varmap.add(nvarmap)
-    return f'(λ{paramstr}.{remove_braces(self.code.fmt(varmap))})'
+    la = f'{Lambda.color}λ{Style.reset}' if highlight else 'λ'
+    return f'({la}{paramstr}.{remove_braces(self.code.fmt(varmap, highlight))})'
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -496,24 +506,25 @@ def from_string(s: str) -> Obj:
   return parse_top(s, {})
 
 
-def to_string(expr: Obj) -> str:
+def to_string(expr: Obj, highlight: bool = False) -> str:
   """Return a string representation for the lambda expression graph."""
-  return remove_braces(expr.recombine().fmt(Naming())).rstrip()
+  return remove_braces(expr.recombine().fmt(Naming(), highlight)).rstrip()
 
 
-def handle(al: List[str], echo: bool) -> int:
+def handle(al: List[str], echo: bool, is_terminal: bool = False) -> int:
   """Loop over given list of strings, parse, simplify, and print the lambda
   expression."""
   ec = 0
+  pr = f'{Fore.rgb(45, 242, 57)}⇒{Style.reset} ' if is_terminal else '⇒ '
   for a in al:
     if echo:
       print(a)
     try:
-      print(f'⇒ {to_string(from_string(a))}')
+      print(f'{pr}{to_string(from_string(a), is_terminal)}')
     except SyntaxError as e:
       print(f'eval("{a}") failed: {e.args[0]}')
       ec = 1
-    print('\u2501' * (os.get_terminal_size()[0] if sys.stdout.isatty() else 72))
+    print('\u2501' * (os.get_terminal_size()[0] if is_terminal else 72))
   return ec
 
 
@@ -521,11 +532,12 @@ def repl() -> int:
   """This is the REPL."""
   ec = 0
   try:
+    is_terminal = sys.stdout.isatty()
     while True:
-      s = input('» ')
+      s = input(f'{Fore.rgb(242, 45, 57)}»{Style.reset} ' if is_terminal else '» ')
       if not s:
         break
-      ec = ec | handle([s], False)
+      ec = ec | handle([s], False, is_terminal)
   except EOFError:
     print('')
   return ec
