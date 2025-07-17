@@ -127,7 +127,7 @@ def remove_braces(s: str) -> str:
 class Obj:
   """Base class for node in the graph representation of a lambda expression."""
   def is_free(self, v: Var) -> bool: # pylint: disable=unused-argument
-    """Test whether this is an object for a free variable.  This is the generic
+    """Test whether this is an object for a free variable in the context.  This is the generic
     implementation."""
     return False
 
@@ -161,7 +161,7 @@ class Var(Obj):
   @override
   def is_free(self, v: Var) -> bool:
     """Test whether this is a free variable.  If we come here and this is the variable
-    we are looking for it is indeed free."""
+    we are looking for it is indeed free in the context."""
     return self.id == v.id
 
   @override
