@@ -139,7 +139,7 @@ def remove_braces(s: str) -> str:
 
 class Obj:
   """Base class for node in the graph representation of a lambda expression."""
-  def is_free(self, v: Var) -> bool: # pylint: disable=unused-argument
+  def is_free_in_context(self, v: Var) -> bool: # pylint: disable=unused-argument
     """Test whether this is an object for a free variable in the context.  This is the generic
     implementation."""
     return False
@@ -185,7 +185,7 @@ class Var(Obj):
     Var.varcnt += 1
 
   @override
-  def is_free(self, v: Var) -> bool:
+  def is_free_in_context(self, v: Var) -> bool:
     """Test whether this is a free variable.  If we come here and this is the variable
     we are looking for it is indeed free in the context."""
     return self.id == v.id
@@ -247,7 +247,7 @@ class Combinator(Obj):
     self.combinator = combinator
 
   @override
-  def is_free(self, v: Var) -> bool:
+  def is_free_in_context(self, v: Var) -> bool:
     return False
 
   @override
@@ -268,8 +268,8 @@ class Application(Obj):
     assert self.code
 
   @override
-  def is_free(self, v: Var) -> bool:
-    return all(e.is_free(v) for e in self.code)
+  def is_free_in_context(self, v: Var) -> bool:
+    return all(e.is_free_in_context(v) for e in self.code)
 
   @override
   def __str__(self):
@@ -327,8 +327,8 @@ class Lambda(Obj):
       self.code = code
 
   @override
-  def is_free(self, v: Var) -> bool:
-    return v not in self.params and self.code.is_free(v)
+  def is_free_in_context(self, v: Var) -> bool:
+    return v not in self.params and self.code.is_free_in_context(v)
 
   @override
   def __str__(self):
@@ -482,7 +482,7 @@ def newlambda(params: List[Var], code: Obj) -> Obj:
   just apply the required parameter(s) to the application value in order."""
   if isinstance(code, Application) and len(params) < len(code.code):
     ncode = len(code.code) - len(params)
-    if params == code.code[ncode:] and all(not c.is_free(e) for e in params for c in code.code[:ncode]):
+    if params == code.code[ncode:] and all(not c.is_free_in_context(e) for e in params for c in code.code[:ncode]):
       return code.code[0] if ncode == 1 else Application(code.code[:ncode])
   return Lambda(params, code)
 
