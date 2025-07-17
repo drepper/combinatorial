@@ -26,10 +26,10 @@ import argparse
 import functools
 import os
 import sys
-from typing import cast, ClassVar, Dict, List, override, Tuple
+from typing import cast, ClassVar, Dict, List, override, Optional, Tuple
 
 
-# These are the characters accepted and used as variable names.  The list
+# These are the characters accepted and used s variable names.  The list
 # could be extended here and everything else should just work.  But it
 # should be noted that
 # a) uppercase characters are used in the names of known combinators
@@ -153,8 +153,9 @@ class Var(Obj):
   the de Bruijn notation by representing each new variable with a unique number."""
   varcnt: ClassVar[int] = 1
 
-  def __init__(self):
+  def __init__(self, freename: Optional[str] = None):
     self.id = Var.varcnt
+    self.freename = freename
     Var.varcnt += 1
 
   @override
@@ -169,7 +170,7 @@ class Var(Obj):
 
   @override
   def fmt(self, varmap: Naming) -> str:
-    return varmap.get(self)
+    return self.freename or varmap.get(self)
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -383,7 +384,7 @@ def parse_one(s: str, ctx: Dict[str, Var]) -> Tuple[Obj, str]:
     case '(':
       return parse_paren(s, ctx)
     case c if c in VARIABLE_NAMES:
-      return ctx[s[0]] if s[0] in ctx else Var(), s[1:]
+      return ctx[s[0]] if s[0] in ctx else Var(s[0]), s[1:]
     case c if c.isalpha():
       return get_constant(s)
     case _:
@@ -534,6 +535,7 @@ def check() -> int:
     ('λabcd.MMMabcd', 'MMM'),
     ('λabcd.MMMabdc', 'λabcd.MMMabdc'),
     ('λabcd.MMMabc', 'λabcd.MMMabc'),
+    ('S(Ke)I', 'e'),
   ]
   ec = 0
   for testinput, expected in [(key, key) for key in KNOWN_COMBINATORS] + checks:
