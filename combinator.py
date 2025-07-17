@@ -147,6 +147,14 @@ class Obj:
     """Duplicate the object."""
     return self
 
+  def recombine(self) -> Obj:
+    """Recombine combinators."""
+    return self
+
+  def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
+    """Determine whether the expression matches OTHER considering variable renaming in VAR_MAP."""
+    return self == other
+
 
 class Var(Obj):
   """Object to represent a variable in the lambda expression graph.  This implements
@@ -176,6 +184,10 @@ class Var(Obj):
   def replace(self, v: Var, expr: Obj) -> Obj:
     return expr.duplicate() if v.id == self.id else self
 
+  @override
+  def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
+    return isinstance(other, Var) and (self.id == other.id or var_map.get(self) == other)
+
 
 class Empty(Obj):
   """Object returned to indicate errors when parsing lambda expressions."""
@@ -201,6 +213,25 @@ class Constant(Obj):
   @override
   def fmt(self, varmap: Naming) -> str:
     return f'{self.name} '
+
+
+
+class Combinator(Obj):
+  """Object to represent a recombined combinator."""
+  def __init__(self, combinator: str):
+    self.combinator = combinator
+
+  @override
+  def is_free(self, v: Var) -> bool:
+    return False
+
+  @override
+  def __str__(self):
+    return self.combinator
+
+  @override
+  def fmt(self, varmap: Naming) -> str:
+    return self.combinator
 
 
 class Application(Obj):
@@ -230,6 +261,14 @@ class Application(Obj):
   @override
   def duplicate(self) -> Obj:
     return Application([e.duplicate() for e in self.code])
+
+  @override
+  def recombine(self) -> Obj:
+      return Application([r.recombine() for r in self.code])
+
+  @override
+  def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
+    return isinstance(other, Application) and len(self.code) == len(other.code) and all(a.rmatch(b, var_map) for a, b in zip(self.code, other.code))
 
   def beta(self) -> Obj:
     """Perform beta reduction on the given application.  This is called on a freshly
@@ -271,8 +310,7 @@ class Lambda(Obj):
     nvarmap = Naming()
     paramstr = ''.join([a.fmt(nvarmap) for a in self.params])
     varmap.add(nvarmap)
-    res = Lambda.known_name(f'(λ{paramstr}.{remove_braces(self.code.fmt(varmap))})')
-    return res
+    return f'(λ{paramstr}.{remove_braces(self.code.fmt(varmap))})'
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -284,18 +322,28 @@ class Lambda(Obj):
     newcode = functools.reduce(lambda p, o: p.replace(*o), zip(self.params, newparams), self.code)
     return newlambda(newparams, newcode)
 
-  @staticmethod
-  def known_name(la: str) -> str:
-    """Determine whether the formatted expressions corresponds to a known combinator
-    and return that name.  Otherwise return the original expression."""
-    lar = remove_braces(la)
-    try:
-      la = next(k for k, v in KNOWN_COMBINATORS.items() if v == lar)
-      if args.tracing: # pylint: disable=possibly-used-before-assignment
-        print(f'→ {lar}')
-    except StopIteration:
-      pass
-    return la
+  @override
+  def recombine(self) -> Obj:
+    rself = Lambda(self.params, self.code.recombine())
+    for k, v in KNOWN_COMBINATORS.items():
+      if rself.match(v):
+        return Combinator(k)
+    return rself
+
+  @override
+  def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
+    return isinstance(other, Lambda) and self.code.rmatch(other.code, var_map)
+
+  def match(self, cstr: str) -> bool:
+    c = from_string(cstr)
+    assert isinstance(c, Lambda)
+    if len(self.params) > len(c.params):
+      return False
+    # TODO: For now
+    if len(self.params) != len(c.params):
+      return False
+    param_map = {k: v for k, v in zip(self.params, c.params)}
+    return self.rmatch(c, param_map)
 
 
 def parse_lambda(s: str, ctx: Dict[str, Var]) -> Tuple[Obj, str]:
@@ -450,7 +498,7 @@ def from_string(s: str) -> Obj:
 
 def to_string(expr: Obj) -> str:
   """Return a string representation for the lambda expression graph."""
-  return remove_braces(expr.fmt(Naming())).rstrip()
+  return remove_braces(expr.recombine().fmt(Naming())).rstrip()
 
 
 def handle(al: List[str], echo: bool) -> int:
@@ -535,16 +583,17 @@ def check() -> int:
     ('λabcd.MMMabcd', 'MMM'),
     ('λabcd.MMMabdc', 'λabcd.MMMabdc'),
     ('λabcd.MMMabc', 'λabcd.MMMabc'),
-    ('S(Ke)I', 'e'),
+    ('S(K e)I', 'e'),
   ]
   ec = 0
   for testinput, expected in [(key, key) for key in KNOWN_COMBINATORS] + checks:
-    res = to_string(from_string(testinput))
+    resexpr = from_string(testinput)
+    res = to_string(resexpr)
     if res != expected:
       if expected in KNOWN_COMBINATORS:
-        print(f'❌ {testinput} → {res} but {expected} = {KNOWN_COMBINATORS[expected]} expected')
+        print(f'❌ {testinput} → {res} {resexpr} but {expected} {from_string(expected)} = {KNOWN_COMBINATORS[expected]} expected')
       else:
-        print(f'❌ {testinput} → {res} but {expected} expected')
+        print(f'❌ {testinput} → {res} {resexpr} but {expected} {from_string(expected)} expected')
       ec = 1
     else:
       print(f'✅ {testinput} → {res}')
