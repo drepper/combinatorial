@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-# Copyright © 2024 Ulrich Drepper <drepper@akkadia.org>
+# Copyright © 2025 Ulrich Drepper <drepper@akkadia.org>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files(the "Software"), to deal
@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import functools
 import os
 import sys
@@ -59,11 +58,12 @@ class Naming:
         self.next = '_'
     return self.known[v.id]
 
-  def contains(self, v: Var):
+  def contains(self, v: Var) -> bool:
     """Return true if given id is known."""
     return v.id in self.known
 
   def add(self, other: Naming) -> None:
+    """Add definitions from other variable set to own."""
     if other.known:
       self.next = VARIABLE_NAMES[max(VARIABLE_NAMES.index(self.next), VARIABLE_NAMES.index(other.next))]
       assert not set(self.known.keys()) & set(other.known.keys())
@@ -290,7 +290,7 @@ class Lambda(Obj):
     lar = remove_braces(la)
     try:
       la = next(k for k, v in KNOWN_COMBINATORS.items() if v == lar)
-      if args.tracing: # pylint: disable=used-before-assignment
+      if args.tracing: # pylint: disable=possibly-used-before-assignment
         print(f'→ {lar}')
     except StopIteration:
       pass
@@ -356,17 +356,21 @@ def get_constant(s: str) -> Tuple[Obj, str]:
   characters using the string representation (λ, (, ), or .) or a whitespace.
   Return the graph representation and the remainder of the string not part of
   the just parsed part."""
-  i = 0
-  while i < len(s) and s[i] != ')' and s[i] != '(' and s[i] != '.' and not s[i].isspace() and s[i] != 'λ':
-    i += 1
-  # i is now the maximum length of the constant.  Look for the maximum length known combinator.
-  e = Constant(s[:i])
-  for j in range(i, 0, -1):
-    if s[:j] in KNOWN_COMBINATORS:
-      e = parse_top(KNOWN_COMBINATORS[s[:j]], {})
-      i = j
-      break
-  return e, s[i:].lstrip()
+  delimiters = {')', '(', '.', 'λ', '\n', '\t', '\v', '\f', ' ', '\r'}
+  end_idx = 0
+  while end_idx < len(s) and s[end_idx] not in delimiters:
+    end_idx += 1
+
+  token = s[:end_idx]
+  # Find the longest known combinator that is a prefix of the token.
+  for i in range(len(token), 0, -1):
+    prefix = token[:i]
+    if prefix in KNOWN_COMBINATORS:
+      expr = parse_top(KNOWN_COMBINATORS[prefix], {})
+      return expr, s[i:].lstrip()
+
+  # No known combinator found, treat the whole token as a constant.
+  return Constant(token), s[end_idx:].lstrip()
 
 
 def parse_one(s: str, ctx: Dict[str, Var]) -> Tuple[Obj, str]:
@@ -390,14 +394,11 @@ def newlambda(params: List[Var], code: Obj) -> Obj:
   """Create a new lambda expression using the given parametesr and body of code.
   But the function also performs η-reduction, i.e., it returns just the function
   expression (first of the application values) in case the resulting lambda would
-  just apply the required parameter to the application value in order."""
+  just apply the required parameter(s) to the application value in order."""
   if isinstance(code, Application) and len(params) < len(code.code):
     ncode = len(code.code) - len(params)
     if params == code.code[ncode:] and all(not c.is_free(e) for e in params for c in code.code[:ncode]):
-      if ncode == 1:
-        return code.code[0]
-      else:
-        return Application(code.code[:ncode])
+      return code.code[0] if ncode == 1 else Application(code.code[:ncode])
   return Lambda(params, code)
 
 
