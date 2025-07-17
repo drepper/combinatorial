@@ -485,7 +485,6 @@ def repl() -> int:
 def check() -> int:
   """Sanity checks.  Return error code that is used as the exit code of the process."""
   checks = [
-    ('K', 'K'),
     ('S K K', 'I'),
     ('K I', 'π'),
     ('K (S K K)', 'π'),
@@ -537,7 +536,7 @@ def check() -> int:
     ('λabcd.MMMabc', 'λabcd.MMMabc'),
   ]
   ec = 0
-  for testinput, expected in checks:
+  for testinput, expected in [(key, key) for key in KNOWN_COMBINATORS] + checks:
     res = to_string(from_string(testinput))
     if res != expected:
       if expected in KNOWN_COMBINATORS:
