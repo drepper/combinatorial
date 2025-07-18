@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import itertools
 import os
 import sys
 from typing import cast, ClassVar, Dict, List, override, Optional, Set, Tuple
@@ -142,7 +143,7 @@ class Obj:
   def is_free_in_context(self, v: Var) -> bool: # pylint: disable=unused-argument
     """Test whether this is an object for a free variable in the context.  This is the generic
     implementation."""
-    return False
+    return True
 
   def __str__(self) -> str:
     raise NotImplementedError('__str__ called for Obj')
@@ -164,7 +165,7 @@ class Obj:
     """Recombine combinators."""
     return self
 
-  def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
+  def rmatch(self, other: Obj, var_map: Dict[Var, Obj]) -> bool:
     """Determine whether the expression matches OTHER considering variable renaming in VAR_MAP."""
     return self == other
 
@@ -176,8 +177,8 @@ class Var(Obj):
   """Object to represent a variable in the lambda expression graph.  This implements
   the de Bruijn notation by representing each new variable with a unique number."""
   varcnt: ClassVar[int] = 1
-  color: str = Fore.rgb(242, 185, 45)
-  color_free: str = Fore.rgb(255, 64, 23)
+  color: ClassVar[str] = Fore.rgb(242, 185, 45)
+  color_free: ClassVar[str] = Fore.rgb(255, 64, 23)
 
   def __init__(self, freename: Optional[str] = None):
     self.id = Var.varcnt
@@ -188,7 +189,7 @@ class Var(Obj):
   def is_free_in_context(self, v: Var) -> bool:
     """Test whether this is a free variable.  If we come here and this is the variable
     we are looking for it is indeed free in the context."""
-    return self.id == v.id
+    return self.id != v.id
 
   @override
   def __str__(self):
@@ -204,8 +205,15 @@ class Var(Obj):
     return expr.duplicate() if v.id == self.id else self
 
   @override
-  def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
-    return isinstance(other, Var) and (self.id == other.id or var_map.get(self) == other)
+  def rmatch(self, other: Obj, var_map: Dict[Var, Obj]) -> bool:
+    if not isinstance(other, Var):
+      return False
+    if self.id == other.id or var_map.get(other) == self:
+      return True
+    if isinstance(var_map.get(other), Empty) and self not in var_map.values():
+      var_map[other] = self
+      return True
+    return False
 
   @override
   def collect_free_vars(self) -> Set[str]:
@@ -213,7 +221,8 @@ class Var(Obj):
 
 
 class Empty(Obj):
-  """Object returned to indicate errors when parsing lambda expressions."""
+  """Object returned to indicate errors when parsing lambda expressions and other situations when a non-existing
+  object needs to be represented."""
   @override
   def __str__(self):
     return '{}'
@@ -241,22 +250,28 @@ class Constant(Obj):
 
 class Combinator(Obj):
   """Object to represent a recombined combinator."""
-  color: str = Fore.rgb(255, 0, 163)
+  color: ClassVar[str] = Fore.rgb(255, 0, 163)
 
-  def __init__(self, combinator: str):
+  def __init__(self, combinator: str, args: List[Obj] = []):
     self.combinator = combinator
+    self.args = args
 
   @override
   def is_free_in_context(self, v: Var) -> bool:
-    return False
+    return True
 
   @override
   def __str__(self):
+    if self.args:
+      return f'{{{self.combinator} {' '.join([str(a) for a in self.args])}}}'
     return self.combinator
 
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
-    return f'{Combinator.color}{self.combinator}{Style.reset}' if highlight else self.combinator
+    combres = f'{Combinator.color}{self.combinator}{Style.reset}' if highlight else self.combinator
+    if self.args:
+      combres += ' ' + ' '.join([a.fmt(varmap, highlight) for a in self.args])
+    return combres
 
 
 class Application(Obj):
@@ -292,7 +307,7 @@ class Application(Obj):
       return Application([r.recombine() for r in self.code])
 
   @override
-  def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
+  def rmatch(self, other: Obj, var_map: Dict[Var, Obj]) -> bool:
     return isinstance(other, Application) and len(self.code) == len(other.code) and all(a.rmatch(b, var_map) for a, b in zip(self.code, other.code))
 
   @override
@@ -314,7 +329,7 @@ class Application(Obj):
 
 class Lambda(Obj):
   """Object to represent a lambda expression in the lambda expression graph."""
-  color: str = Fore.rgb(45, 135, 242)
+  color: ClassVar[str] = Fore.rgb(45, 135, 242)
 
   def __init__(self, params: List[Var], code: Obj):
     if not params:
@@ -358,24 +373,39 @@ class Lambda(Obj):
   def recombine(self) -> Obj:
     rself = Lambda(self.params, self.code.recombine())
     for k, v in KNOWN_COMBINATORS.items():
-      if rself.match(v):
-        return Combinator(k)
+      m = rself.match(k, v)
+      if m:
+        return m
     return rself
 
   @override
-  def rmatch(self, other: Obj, var_map: Dict[Var, Var]) -> bool:
-    return isinstance(other, Lambda) and self.code.rmatch(other.code, var_map)
+  def rmatch(self, other: Obj, var_map: Dict[Var, Obj]) -> bool:
+    if not isinstance(other, Lambda):
+      return False
+    newvar_map = var_map.copy()
+    for param, newparam in zip(self.params, other.params):
+      newvar_map[param] = newparam
+    if self.code.rmatch(other.code, newvar_map):
+      # Propagate the newly found values back to the caller.
+      for k in var_map:
+        if isinstance(var_map[k], Empty):
+          var_map[k] = newvar_map[k]
+      return True
+    return False
 
-  def match(self, cstr: str) -> bool:
+  def match(self, comb:str, cstr: str) -> Optional[Obj]:
     c = from_string(cstr)
     assert isinstance(c, Lambda)
-    if len(self.params) > len(c.params):
-      return False
-    # TODO: For now
-    if len(self.params) != len(c.params):
-      return False
-    param_map = {k: v for k, v in zip(self.params, c.params)}
-    return self.rmatch(c, param_map)
+    # Recognize the K combinator with first argument consisting only of expressions with free variables.
+    if comb == 'K' and len(self.params) == 1 and len(c.params) > 1 and self.code.is_free_in_context(self.params[0]):
+      return Combinator(comb, [self.code])
+    if len(self.params) <= len(c.params):
+      # We are interested in simplifications which do not introduce deeper levels of nesting.  This means
+      # we do not have to perform exhaustive recursive searches.
+      param_map = cast(Dict[Var, Obj], {k: v for k, v in itertools.zip_longest(reversed(c.params), reversed(self.params), fillvalue=Empty())})
+      if self.rmatch(c, param_map):
+        return Combinator(comb, [param_map[p] for p in c.params[:len(c.params)-len(self.params)]])
+    return None
 
   @override
   def collect_free_vars(self) -> Set[str]:
@@ -482,7 +512,7 @@ def newlambda(params: List[Var], code: Obj) -> Obj:
   just apply the required parameter(s) to the application value in order."""
   if isinstance(code, Application) and len(params) < len(code.code):
     ncode = len(code.code) - len(params)
-    if params == code.code[ncode:] and all(not c.is_free_in_context(e) for e in params for c in code.code[:ncode]):
+    if params == code.code[ncode:] and all(c.is_free_in_context(e) for e in params for c in code.code[:ncode]):
       return code.code[0] if ncode == 1 else Application(code.code[:ncode])
   return Lambda(params, code)
 
@@ -622,6 +652,14 @@ def check() -> int:
     ('λabcd.MMMabdc', 'λabcd.MMMabdc'),
     ('λabcd.MMMabc', 'λabcd.MMMabc'),
     ('S(K e)I', 'e'),
+    # Simplification rules (Augustsson)
+    ('S (K a) (K b)', 'K (ab)'),
+    ('S (K a) I', 'a'),
+    ('S (K a) b', 'B a b'),
+    ('S a (K b)', 'C a b'),
+    ('S (B a b) c', 'Φ a b c'),
+    # ('C (B a b) c', 'C# a b c'), # where 'C# = λabcd.a(b d)c'
+    ('B (a b) c', 'D a b c'),
   ]
   ec = 0
   for testinput, expected in [(key, key) for key in KNOWN_COMBINATORS] + checks:
