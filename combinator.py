@@ -725,13 +725,14 @@ def main() -> None:
     # Overwrite eventual user setting
     args.tracing = False
     ec = check()
-  elif args.expression:
-    ec = handle(' '.join(args.expression), True)
   else:
-    ec = repl()
+    init_terminal()
+    if args.expression:
+      ec = handle(' '.join(args.expression), True)
+    else:
+      ec = repl()
   sys.exit(ec)
 
 
 if __name__ == '__main__':
-  init_terminal()
   main()
