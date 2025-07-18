@@ -20,4 +20,4 @@ jobs:
           sudo apt update
           sudo apt install -y python3-colored make
       - name: Run tests
-        run: make test
+        run: make check
