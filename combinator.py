@@ -688,7 +688,6 @@ def check() -> int:
   return ec
 
 
-# def main(al: List[str]) -> None:
 def main() -> None:
   """Called as main function of the program."""
   parser = argparse.ArgumentParser()
