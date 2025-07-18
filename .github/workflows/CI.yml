@@ -18,6 +18,6 @@ jobs:
       - name: Get dependencies
         run: |
           sudo apt update
-          sudo apt install -y python3-colored make
+          sudo apt-get -y install python3-colored
       - name: Run tests
         run: make check
