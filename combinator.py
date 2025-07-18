@@ -34,29 +34,35 @@ from typing import cast, ClassVar, Dict, List, override, Optional, Set, Tuple
 from colored import Fore, Style
 
 
-is_terminal = sys.stdout.isatty()
-colors = {n: '' for n in ["off", "input_prompt", "var", "freevar", "combinator", "lambda", "output_prompt"]}
-if is_terminal:
-  for k in colors:
-    match k:
-      case "input_prompt":
-        newval = Fore.rgb(242, 45, 57)
-      case "output_prompt":
-        newval = Fore.rgb(45, 242, 57)
-      case "var":
-        newval= Fore.rgb(242, 185, 45)
-      case "freevar":
-        newval= Fore.rgb(255, 64, 23)
-      case "combinator":
-        newval = Fore.rgb(255, 0, 163)
-      case "lambda":
-        newval = Fore.rgb(45, 135, 242)
-      case "off":
-        newval = Style.reset
-      case _:
-        print(f'unhandled color {k}')
-        sys.exit(1)
-    colors[k] = newval
+COLORS = {n: '' for n in ["off", "input_prompt", "var", "freevar", "combinator", "lambda", "output_prompt"]}
+IS_TERMINAL = False
+
+
+def init_terminal() -> None:
+  """Initialize configuration to use terminal features."""
+  global IS_TERMINAL # pylint: disable=global-statement
+  IS_TERMINAL = sys.stdout.isatty()
+  if IS_TERMINAL:
+    for k in COLORS:
+      match k:
+        case "input_prompt":
+          newval = Fore.rgb(242, 45, 57)
+        case "output_prompt":
+          newval = Fore.rgb(45, 242, 57)
+        case "var":
+          newval= Fore.rgb(242, 185, 45)
+        case "freevar":
+          newval= Fore.rgb(255, 64, 23)
+        case "combinator":
+          newval = Fore.rgb(255, 0, 163)
+        case "lambda":
+          newval = Fore.rgb(45, 135, 242)
+        case "off":
+          newval = Style.reset
+        case _:
+          print(f'unhandled color {k}')
+          sys.exit(1)
+      COLORS[k] = newval
 
 
 # These are the characters accepted and used s variable names.  The list
@@ -233,7 +239,7 @@ class Var(Obj):
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
     res = self.freename or varmap.get(self)
-    return f'{colors["freevar" if self.freename else "var"]}{res}{colors["off"]}'
+    return f'{COLORS["freevar" if self.freename else "var"]}{res}{COLORS["off"]}'
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -301,7 +307,7 @@ class Combinator(Obj):
 
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
-    combres = f'{colors["combinator"]}{self.combinator}{colors["off"]}'
+    combres = f'{COLORS["combinator"]}{self.combinator}{COLORS["off"]}'
     if self.arguments:
       combres += ' ' + ' '.join([a.fmt(varmap, highlight) for a in self.arguments])
     return combres
@@ -387,7 +393,7 @@ class Lambda(Obj):
     nvarmap = Naming(varmap.avoid)
     paramstr = ''.join([a.fmt(nvarmap, highlight) for a in self.params])
     varmap.add(nvarmap)
-    la = f'{colors["lambda"]}λ{colors["off"]}'
+    la = f'{COLORS["lambda"]}λ{COLORS["off"]}'
     return f'({la}{paramstr}.{remove_braces(self.code.fmt(varmap, highlight))})'
 
   @override
@@ -589,24 +595,22 @@ def to_string(expr: Obj, highlight: bool = False) -> str:
   return remove_braces(expr.recombine().fmt(Naming(expr.collect_free_vars()), highlight)).rstrip()
 
 
-def handle(al: List[str], echo: bool, is_terminal: bool = False) -> int:
-  """Loop over given list of strings, parse, simplify, and print the lambda
-  expression."""
+def handle(a: str, echo: bool) -> int:
+  """Parse given string, simplify, and print the lambda expression."""
   ec = 0
-  input_prompt = f'{colors["input_prompt"]}»{colors["off"]} '
-  output_prompt = f'{colors["output_prompt"]}⇒{colors["off"]} ' if is_terminal else ''
-  separator_len = os.get_terminal_size()[0] if is_terminal else 72
+  input_prompt = f'{COLORS["input_prompt"]}»{COLORS["off"]} '
+  output_prompt = f'{COLORS["output_prompt"]}⇒{COLORS["off"]} ' if IS_TERMINAL else ''
+  separator_len = os.get_terminal_size()[0] if IS_TERMINAL else 72
 
-  for a in al:
-    if echo and is_terminal:
-      print(f'{input_prompt}{a}')
-    try:
-      print(f'{output_prompt}{to_string(from_string(a), is_terminal)}')
-    except SyntaxError as e:
-      print(f'eval("{a}") failed: {e.args[0]}')
-      ec = 1
-    if not echo:
-      print('\u2501' * separator_len)
+  if echo and IS_TERMINAL:
+    print(f'{input_prompt}{a}')
+  try:
+    print(f'{output_prompt}{to_string(from_string(a), IS_TERMINAL)}')
+  except SyntaxError as e:
+    print(f'eval("{a}") failed: {e.args[0]}')
+    ec = 1
+  if not echo:
+    print('\u2501' * separator_len)
   return ec
 
 
@@ -614,13 +618,12 @@ def repl() -> int:
   """This is the REPL."""
   ec = 0
   try:
-    is_terminal = sys.stdout.isatty()
-    input_prefix = f'{colors["input_prompt"]}»{colors["off"]} '
+    input_prefix = f'{COLORS["input_prompt"]}»{COLORS["off"]} '
     while True:
       s = input(input_prefix)
       if not s:
         break
-      ec = ec | handle([s], False, is_terminal)
+      ec = ec | handle(s, False)
   except EOFError:
     print('')
   return ec
@@ -723,11 +726,12 @@ def main() -> None:
     args.tracing = False
     ec = check()
   elif args.expression:
-    ec = handle(args.expression, True, sys.stdout.isatty())
+    ec = handle(' '.join(args.expression), True)
   else:
     ec = repl()
   sys.exit(ec)
 
 
 if __name__ == '__main__':
+  init_terminal()
   main()
