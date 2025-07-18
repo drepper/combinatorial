@@ -34,6 +34,31 @@ from typing import cast, ClassVar, Dict, List, override, Optional, Set, Tuple
 from colored import Fore, Style
 
 
+is_terminal = sys.stdout.isatty()
+colors = {n: '' for n in ["off", "input_prompt", "var", "freevar", "combinator", "lambda", "output_prompt"]}
+if is_terminal:
+  for k in colors:
+    match k:
+      case "input_prompt":
+        newval = Fore.rgb(242, 45, 57)
+      case "output_prompt":
+        newval = Fore.rgb(45, 242, 57)
+      case "var":
+        newval= Fore.rgb(242, 185, 45)
+      case "freevar":
+        newval= Fore.rgb(255, 64, 23)
+      case "combinator":
+        newval = Fore.rgb(255, 0, 163)
+      case "lambda":
+        newval = Fore.rgb(45, 135, 242)
+      case "off":
+        newval = Style.reset
+      case _:
+        print(f'unhandled color {k}')
+        sys.exit(1)
+    colors[k] = newval
+
+
 # These are the characters accepted and used s variable names.  The list
 # could be extended here and everything else should just work.  But it
 # should be noted that
@@ -189,8 +214,6 @@ class Var(Obj):
   """Object to represent a variable in the lambda expression graph.  This implements
   the de Bruijn notation by representing each new variable with a unique number."""
   varcnt: ClassVar[int] = 1
-  color: ClassVar[str] = Fore.rgb(242, 185, 45)
-  color_free: ClassVar[str] = Fore.rgb(255, 64, 23)
 
   def __init__(self, freename: Optional[str] = None):
     self.id = Var.varcnt
@@ -210,7 +233,7 @@ class Var(Obj):
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
     res = self.freename or varmap.get(self)
-    return f'{Var.color_free if self.freename else Var.color}{res}{Style.reset}' if highlight else res
+    return f'{colors["freevar" if self.freename else "var"]}{res}{colors["off"]}'
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -262,8 +285,6 @@ class Constant(Obj):
 
 class Combinator(Obj):
   """Object to represent a recombined combinator."""
-  color: ClassVar[str] = Fore.rgb(255, 0, 163)
-
   def __init__(self, combinator: str, arguments: Optional[List[Obj]] = None):
     self.combinator = combinator
     self.arguments = [] if arguments is None else arguments
@@ -280,7 +301,7 @@ class Combinator(Obj):
 
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
-    combres = f'{Combinator.color}{self.combinator}{Style.reset}' if highlight else self.combinator
+    combres = f'{colors["combinator"]}{self.combinator}{colors["off"]}'
     if self.arguments:
       combres += ' ' + ' '.join([a.fmt(varmap, highlight) for a in self.arguments])
     return combres
@@ -341,8 +362,6 @@ class Application(Obj):
 
 class Lambda(Obj):
   """Object to represent a lambda expression in the lambda expression graph."""
-  color: ClassVar[str] = Fore.rgb(45, 135, 242)
-
   def __init__(self, params: List[Var], code: Obj):
     if not params:
       raise SyntaxError('lambda parameter list cannot be empty')
@@ -368,7 +387,7 @@ class Lambda(Obj):
     nvarmap = Naming(varmap.avoid)
     paramstr = ''.join([a.fmt(nvarmap, highlight) for a in self.params])
     varmap.add(nvarmap)
-    la = f'{Lambda.color}λ{Style.reset}' if highlight else 'λ'
+    la = f'{colors["lambda"]}λ{colors["off"]}'
     return f'({la}{paramstr}.{remove_braces(self.code.fmt(varmap, highlight))})'
 
   @override
@@ -574,17 +593,20 @@ def handle(al: List[str], echo: bool, is_terminal: bool = False) -> int:
   """Loop over given list of strings, parse, simplify, and print the lambda
   expression."""
   ec = 0
-  pr = f'{Fore.rgb(45, 242, 57)}⇒{Style.reset} ' if is_terminal else '⇒ ' if is_terminal else ''
+  input_prompt = f'{colors["input_prompt"]}»{colors["off"]} '
+  output_prompt = f'{colors["output_prompt"]}⇒{colors["off"]} ' if is_terminal else ''
+  separator_len = os.get_terminal_size()[0] if is_terminal else 72
+
   for a in al:
     if echo and is_terminal:
-      print(f'{Fore.rgb(242, 45, 57)}»{Style.reset} {a}' if is_terminal else f'» {a}')
+      print(f'{input_prompt}{a}')
     try:
-      print(f'{pr}{to_string(from_string(a), is_terminal)}')
+      print(f'{output_prompt}{to_string(from_string(a), is_terminal)}')
     except SyntaxError as e:
       print(f'eval("{a}") failed: {e.args[0]}')
       ec = 1
     if not echo:
-      print('\u2501' * (os.get_terminal_size()[0] if is_terminal else 72))
+      print('\u2501' * separator_len)
   return ec
 
 
@@ -593,8 +615,9 @@ def repl() -> int:
   ec = 0
   try:
     is_terminal = sys.stdout.isatty()
+    input_prefix = f'{colors["input_prompt"]}»{colors["off"]} '
     while True:
-      s = input(f'{Fore.rgb(242, 45, 57)}»{Style.reset} ' if is_terminal else '» ')
+      s = input(input_prefix)
       if not s:
         break
       ec = ec | handle([s], False, is_terminal)
