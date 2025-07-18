@@ -23,3 +23,5 @@ jobs:
         run: ls -d /usr/lib/python*/*-packages/*
       - name: Run tests
         run: make check
+        env:
+          PYTHONPATH: "/usr/lib/python3/dist-packages"
