@@ -1,5 +1,5 @@
 [![Build Status](https://github.com/drepper/combinatorial/workflows/CI/badge.svg)](https://github.com/drepper/combinatorial/actions)
-[![License: MIT](license-MIT-blue.svg)](https://github.com/drepper/combinatorial/blob/master/LICENSE)
+[![License: MIT](extra/badge-license-MIT-blue.svg)](https://github.com/drepper/combinatorial/blob/master/LICENSE)
 
 # Combinatorial Evaluator
 
