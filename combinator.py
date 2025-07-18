@@ -1,4 +1,5 @@
 #! /usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright © 2025 Ulrich Drepper <drepper@akkadia.org>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -77,11 +78,12 @@ class Naming:
       self.known = self.known | other.known
 
   def next_var(self) -> None:
-      while True:
-        idx = VARIABLE_NAMES.index(self.next) + 1
-        self.next = VARIABLE_NAMES[idx] if idx < len(VARIABLE_NAMES) else ''
-        if self.next not in self.avoid:
-            return
+    """Determine the next variable name, taking the names to avoid into account."""
+    while True:
+      idx = VARIABLE_NAMES.index(self.next) + 1
+      self.next = VARIABLE_NAMES[idx] if idx < len(VARIABLE_NAMES) else ''
+      if self.next not in self.avoid:
+        return
 
 
 # List of combinators, mostly taken from
@@ -103,10 +105,13 @@ KNOWN_COMBINATORS = {
   'E': 'λabcde.ab(cde)',
   'Ê': 'λabcdefg.a(bcd)(efg)',
   'F': 'λabc.cba',
+  'F*': 'λabcd.adcb',
+  'F**': 'λabcde.abedc',
   'G': 'λabcd.ad(bc)',
   'H': 'λabc.abcb',
   'I': 'λa.a',
   'I*': 'λab.ab',
+  'I**': 'λabc.abc',
   'J': 'λabcd.ab(adc)',
   'K': 'λab.a',
   'L': 'λab.a(bb)',
@@ -121,13 +126,18 @@ KNOWN_COMBINATORS = {
   'Q₁': 'λabc.a(cb)',
   'Q₂': 'λabc.b(ca)',
   'Q₃': 'λabc.c(ab)',
+  'Q₄': 'λabc.c(ba)',
   'R': 'λabc.bca',
+  'R*': 'λabcd.acdb',
+  'R**': 'λabcde.abdec',
   'S': 'λabc.ac(bc)',
   'T': 'λab.ba',
   'U': 'λab.b(aab)',
   'V': 'λabc.cab',
+  'V*': 'λabcd.adbc',
+  'V**': 'λabcde.abecd',
   'W': 'λab.abb',
-  'W₁': 'λab.baa',
+  'W¹': 'λab.baa',
   'W*': 'λabc.abcc',
   'W**': 'λabcd.abcdd',
 }
@@ -165,11 +175,12 @@ class Obj:
     """Recombine combinators."""
     return self
 
-  def rmatch(self, other: Obj, var_map: Dict[Var, Obj]) -> bool:
+  def rmatch(self, other: Obj, var_map: Dict[Var, Obj]) -> bool: # pylint: disable=unused-argument
     """Determine whether the expression matches OTHER considering variable renaming in VAR_MAP."""
     return self == other
 
   def collect_free_vars(self) -> Set[str]:
+    """Return a set of all the variables that are free for the entire expression."""
     return set()
 
 
@@ -252,9 +263,9 @@ class Combinator(Obj):
   """Object to represent a recombined combinator."""
   color: ClassVar[str] = Fore.rgb(255, 0, 163)
 
-  def __init__(self, combinator: str, args: List[Obj] = []):
+  def __init__(self, combinator: str, arguments: Optional[List[Obj]] = None):
     self.combinator = combinator
-    self.args = args
+    self.arguments = [] if arguments is None else arguments
 
   @override
   def is_free_in_context(self, v: Var) -> bool:
@@ -262,15 +273,15 @@ class Combinator(Obj):
 
   @override
   def __str__(self):
-    if self.args:
-      return f'{{{self.combinator} {' '.join([str(a) for a in self.args])}}}'
+    if self.arguments:
+      return f'{{{self.combinator} {' '.join([str(a) for a in self.arguments])}}}'
     return self.combinator
 
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
     combres = f'{Combinator.color}{self.combinator}{Style.reset}' if highlight else self.combinator
-    if self.args:
-      combres += ' ' + ' '.join([a.fmt(varmap, highlight) for a in self.args])
+    if self.arguments:
+      combres += ' ' + ' '.join([a.fmt(varmap, highlight) for a in self.arguments])
     return combres
 
 
@@ -304,7 +315,7 @@ class Application(Obj):
 
   @override
   def recombine(self) -> Obj:
-      return Application([r.recombine() for r in self.code])
+    return Application([r.recombine() for r in self.code])
 
   @override
   def rmatch(self, other: Obj, var_map: Dict[Var, Obj]) -> bool:
@@ -372,10 +383,18 @@ class Lambda(Obj):
   @override
   def recombine(self) -> Obj:
     rself = Lambda(self.params, self.code.recombine())
-    for k, v in KNOWN_COMBINATORS.items():
-      m = rself.match(k, v)
-      if m:
-        return m
+    for comb, combstr in KNOWN_COMBINATORS.items():
+      combexpr = from_string(combstr)
+      assert isinstance(combexpr, Lambda)
+      # Recognize the K combinator with first argument consisting only of expressions with free variables.
+      if comb == 'K' and len(self.params) == 1 and len(combexpr.params) > 1 and self.code.is_free_in_context(self.params[0]):
+        return Combinator(comb, [self.code])
+      if len(self.params) <= len(combexpr.params):
+        # We are interested in simplifications which do not introduce deeper levels of nesting.  This means
+        # we do not have to perform exhaustive recursive searches.
+        param_map = cast(Dict[Var, Obj], dict(itertools.zip_longest(reversed(combexpr.params), reversed(self.params), fillvalue=Empty())))
+        if self.rmatch(combexpr, param_map):
+          return Combinator(comb, [param_map[p] for p in combexpr.params[:len(combexpr.params)-len(self.params)]])
     return rself
 
   @override
@@ -392,20 +411,6 @@ class Lambda(Obj):
           var_map[k] = newvar_map[k]
       return True
     return False
-
-  def match(self, comb:str, cstr: str) -> Optional[Obj]:
-    c = from_string(cstr)
-    assert isinstance(c, Lambda)
-    # Recognize the K combinator with first argument consisting only of expressions with free variables.
-    if comb == 'K' and len(self.params) == 1 and len(c.params) > 1 and self.code.is_free_in_context(self.params[0]):
-      return Combinator(comb, [self.code])
-    if len(self.params) <= len(c.params):
-      # We are interested in simplifications which do not introduce deeper levels of nesting.  This means
-      # we do not have to perform exhaustive recursive searches.
-      param_map = cast(Dict[Var, Obj], {k: v for k, v in itertools.zip_longest(reversed(c.params), reversed(self.params), fillvalue=Empty())})
-      if self.rmatch(c, param_map):
-        return Combinator(comb, [param_map[p] for p in c.params[:len(c.params)-len(self.params)]])
-    return None
 
   @override
   def collect_free_vars(self) -> Set[str]:
@@ -479,6 +484,9 @@ def get_constant(s: str) -> Tuple[Obj, str]:
   token = s[:end_idx]
   # Find the longest known combinator that is a prefix of the token.
   for i in range(len(token), 0, -1):
+    # If the token at this position would have one of the known suffixes it must include the latter.
+    if i < end_idx and token[i] in {'*', '₁', '₂', '₃', '₄', '¹'}:
+      continue
     prefix = token[:i]
     if prefix in KNOWN_COMBINATORS:
       expr = parse_top(KNOWN_COMBINATORS[prefix], {})
@@ -528,13 +536,9 @@ def apply(li: List[Obj]) -> Obj:
       res = li[0]
     case _:
       try:
-        if args.tracing:
-          print(f'before beta {str(Application(li))}')
         res = Application(li).beta()
       except RecursionError:
         res = Application(li)
-  if args.tracing:
-    print(f'apply {' '.join([str(e) for e in li])} -> {str(res)}')
   return res
 
 
@@ -549,8 +553,6 @@ def parse_top(s: str, ctx: Dict[str, Var]) -> Obj:
     e, s = parse_one(s, ctx)
     res.append(e)
     s = s.lstrip()
-  if args.tracing:
-    print(f'parse_top res={[str(r) for r in res]}')
   return apply(res)
 
 
@@ -580,7 +582,8 @@ def handle(al: List[str], echo: bool, is_terminal: bool = False) -> int:
     except SyntaxError as e:
       print(f'eval("{a}") failed: {e.args[0]}')
       ec = 1
-    print('\u2501' * (os.get_terminal_size()[0] if is_terminal else 72))
+    if not echo:
+      print('\u2501' * (os.get_terminal_size()[0] if is_terminal else 72))
   return ec
 
 
@@ -637,21 +640,29 @@ def check() -> int:
     ('B C B', 'Q₁'),
     ('C(B C B)', 'Q₂'),
     ('B T', 'Q₃'),
+    ('F* B', 'Q₄'),
     ('B B T', 'R'),
     ('L O', 'U'),
     ('B C T', 'V'),
     ('C(B M R)', 'W'),
-    ('C W', 'W₁'),
+    ('C W', 'W¹'),
     ('S(S K)', 'I*'),
     ('B W', 'W*'),
     ('B C', 'C*'),
     ('B(B W)', 'W**'),
     ('B C*', 'C**'),
+    ('C* C*', 'R*'),
     ('B(B B B)(B(B B B))', 'Ê'),
     ('λabcd.MMMabcd', 'MMM'),
     ('λabcd.MMMabdc', 'λabcd.MMMabdc'),
     ('λabcd.MMMabc', 'λabcd.MMMabc'),
     ('S(K e)I', 'e'),
+    ('B C* R*', 'F*'),
+    ('C* F*', 'V*'),
+    ('B C*', 'C**'),
+    ('B R*', 'R**'),
+    ('B F*', 'F**'),
+    ('B V*', 'V**'),
     # Simplification rules (Augustsson)
     ('S (K a) (K b)', 'K (ab)'),
     ('S (K a) I', 'a'),
@@ -676,23 +687,30 @@ def check() -> int:
   return ec
 
 
-def main(al: List[str]) -> None:
+# def main(al: List[str]) -> None:
+def main() -> None:
   """Called as main function of the program."""
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--check', dest='check', action='store_true')
+  parser.add_argument('expression', metavar='expression', type=str, nargs='*')
+  args = parser.parse_args()
+
   if args.check:
     # Overwrite eventual user setting
     args.tracing = False
     ec = check()
-  elif al:
-    ec = handle(al, True)
+  elif args.expression:
+    ec = handle(args.expression, True)
   else:
     ec = repl()
   sys.exit(ec)
 
 
 if __name__ == '__main__':
-  parser = argparse.ArgumentParser()
-  parser.add_argument('-t', '--tracing', dest='tracing', action='store_true')
-  parser.add_argument('--check', dest='check', action='store_true')
-  parser.add_argument('expression', metavar='expression', type=str, nargs='*')
-  args = parser.parse_args()
-  main(args.expression)
+  # parser = argparse.ArgumentParser()
+  # parser.add_argument('-t', '--tracing', dest='tracing', action='store_true')
+  # parser.add_argument('--check', dest='check', action='store_true')
+  # parser.add_argument('expression', metavar='expression', type=str, nargs='*')
+  # args = parser.parse_args()
+  # main(args.expression)
+  main()
