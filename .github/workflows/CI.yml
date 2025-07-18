@@ -19,7 +19,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt-get -y install python3-colored
+      - name: Show
+        run: ls -d /usr/lib/python*/site-packages/*
       - name: Run tests
-        run: |
-          ls -d /usr/lib/python*/site-packages/*
-          make check
+        run: make check
