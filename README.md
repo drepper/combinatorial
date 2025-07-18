@@ -52,7 +52,7 @@ could replace them with their own.  The only dependency on the names in the impl
 such as ₁ or *, are hardcoded in the scanner code.  But the list of suffixes is also easy to change or extend.
 
 |Name|Lambda Expression|
-|+-|+-|
+|:-|:-|
 |B| 'λabc.a(bc)'|
 |B₁| 'λabcd.a(bcd)'|
 |B₂| 'λabcde.a(bcde)'|
