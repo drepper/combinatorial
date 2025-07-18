@@ -31,7 +31,6 @@ import os
 import sys
 from typing import cast, ClassVar, Dict, List, override, Optional, Set, Tuple
 
-from colored import Fore, Style
 
 
 COLORS = {n: '' for n in ["off", "input_prompt", "var", "freevar", "combinator", "lambda", "output_prompt"]}
@@ -40,6 +39,7 @@ IS_TERMINAL = False
 
 def init_terminal() -> None:
   """Initialize configuration to use terminal features."""
+  from colored import Fore, Style
   global IS_TERMINAL # pylint: disable=global-statement
   IS_TERMINAL = sys.stdout.isatty()
   if IS_TERMINAL:
@@ -239,7 +239,7 @@ class Var(Obj):
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
     res = self.freename or varmap.get(self)
-    return f'{COLORS["freevar" if self.freename else "var"]}{res}{COLORS["off"]}'
+    return f'{COLORS["freevar" if self.freename else "var"]}{res}{COLORS["off"]}' if highlight else res
 
   @override
   def replace(self, v: Var, expr: Obj) -> Obj:
@@ -307,7 +307,7 @@ class Combinator(Obj):
 
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
-    combres = f'{COLORS["combinator"]}{self.combinator}{COLORS["off"]}'
+    combres = f'{COLORS["combinator"]}{self.combinator}{COLORS["off"]}' if highlight else self.combinator
     if self.arguments:
       combres += ' ' + ' '.join([a.fmt(varmap, highlight) for a in self.arguments])
     return combres
@@ -393,7 +393,7 @@ class Lambda(Obj):
     nvarmap = Naming(varmap.avoid)
     paramstr = ''.join([a.fmt(nvarmap, highlight) for a in self.params])
     varmap.add(nvarmap)
-    la = f'{COLORS["lambda"]}λ{COLORS["off"]}'
+    la = f'{COLORS["lambda"]}λ{COLORS["off"]}' if highlight else 'λ'
     return f'({la}{paramstr}.{remove_braces(self.code.fmt(varmap, highlight))})'
 
   @override
