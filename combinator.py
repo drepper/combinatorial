@@ -1,9 +1,10 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
 # Copyright © 2025 Ulrich Drepper <drepper@akkadia.org>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
+# of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
@@ -573,10 +574,10 @@ def handle(al: List[str], echo: bool, is_terminal: bool = False) -> int:
   """Loop over given list of strings, parse, simplify, and print the lambda
   expression."""
   ec = 0
-  pr = f'{Fore.rgb(45, 242, 57)}⇒{Style.reset} ' if is_terminal else '⇒ '
+  pr = f'{Fore.rgb(45, 242, 57)}⇒{Style.reset} ' if is_terminal else '⇒ ' if is_terminal else ''
   for a in al:
-    if echo:
-      print(a)
+    if echo and is_terminal:
+      print(f'{Fore.rgb(242, 45, 57)}»{Style.reset} {a}' if is_terminal else f'» {a}')
     try:
       print(f'{pr}{to_string(from_string(a), is_terminal)}')
     except SyntaxError as e:
@@ -700,17 +701,11 @@ def main() -> None:
     args.tracing = False
     ec = check()
   elif args.expression:
-    ec = handle(args.expression, True)
+    ec = handle(args.expression, True, sys.stdout.isatty())
   else:
     ec = repl()
   sys.exit(ec)
 
 
 if __name__ == '__main__':
-  # parser = argparse.ArgumentParser()
-  # parser.add_argument('-t', '--tracing', dest='tracing', action='store_true')
-  # parser.add_argument('--check', dest='check', action='store_true')
-  # parser.add_argument('expression', metavar='expression', type=str, nargs='*')
-  # args = parser.parse_args()
-  # main(args.expression)
   main()
