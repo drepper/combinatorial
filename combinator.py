@@ -29,7 +29,7 @@ import functools
 import itertools
 import os
 import sys
-from typing import cast, ClassVar, Dict, List, override, Optional, Set, Tuple
+from typing import cast, ClassVar, Dict, List, override, Optional, Self, Set, Tuple
 
 
 
@@ -215,6 +215,10 @@ class Obj:
     """Return a set of all the variables that are free for the entire expression."""
     return set()
 
+  def get_apps(self) -> List[Obj]:
+    """Return a list of all the applications in the expression."""
+    return []
+
 
 class Var(Obj):
   """Object to represent a variable in the lambda expression graph.  This implements
@@ -224,6 +228,7 @@ class Var(Obj):
   def __init__(self, freename: Optional[str] = None):
     self.id = Var.varcnt
     self.freename = freename
+    self.identical_to: Optional[Var] = None
     Var.varcnt += 1
 
   @override
@@ -234,7 +239,7 @@ class Var(Obj):
 
   @override
   def __str__(self):
-    return f'{{var {self.id}}}'
+    return  f'{{var {self.id} → {self.identical_to.id}}}' if self.identical_to else f'{{var {self.id}}}'
 
   @override
   def fmt(self, varmap: Naming, highlight: bool) -> str:
@@ -312,6 +317,10 @@ class Combinator(Obj):
       combres += ' ' + ' '.join([a.fmt(varmap, highlight) for a in self.arguments])
     return combres
 
+  @override
+  def get_apps(self) -> List[Obj]:
+    return list(itertools.chain.from_iterable(a.get_apps() for a in self.arguments))
+
 
 class Application(Obj):
   """Object to represent the application (call) to a function in the lambda
@@ -352,6 +361,10 @@ class Application(Obj):
   @override
   def collect_free_vars(self) -> Set[str]:
     return set().union(*[e.collect_free_vars() for e in self.code])
+
+  @override
+  def get_apps(self) -> List[Obj]:
+    return [self] + list(itertools.chain.from_iterable(a.get_apps() for a in self.code))
 
   def beta(self) -> Obj:
     """Perform beta reduction on the given application.  This is called on a freshly
@@ -441,6 +454,10 @@ class Lambda(Obj):
   @override
   def collect_free_vars(self) -> Set[str]:
     return self.code.collect_free_vars()
+
+  @override
+  def get_apps(self) -> List[Obj]:
+    return self.code.get_apps()
 
 
 def parse_lambda(s: str, ctx: Dict[str, Var]) -> Tuple[Obj, str]:
@@ -595,17 +612,170 @@ def to_string(expr: Obj, highlight: bool = False) -> str:
   return remove_braces(expr.recombine().fmt(Naming(expr.collect_free_vars()), highlight)).rstrip()
 
 
+class Vargen:
+  """Class to generate unique, consecutive variable names."""
+  def __init__(self):
+    self.typeidx: int = 0
+
+  def name(self):
+    res = VARIABLE_NAMES[self.typeidx]
+    self.typeidx += 1
+    return res
+
+
+class Type:
+  """Simple type object used in type signatures."""
+  def __init__(self):
+    self.name = None
+
+  def __repr__(self):
+    return f'Type({self.name})'
+
+  def __str__(self):
+    assert self.name is not None
+    return self.name
+
+  def finalize(self, gen: Vargen) -> Self:
+    """Create variable name."""
+    if self.name is None:
+      self.name = gen.name()
+    return self
+
+
+class TypeFunc(Type):
+  """Type object for functions."""
+  def __init__(self, app: Application):
+    self.args = app
+    self.ret = None
+
+  def __repr__(self):
+    return f'TypeFunc({self.args})'
+
+
+def determine_types(obj: Obj, types: Dict[Obj, List[Type]]) -> Dict[Obj, List[Type]]:
+  """Traverse the expression object and extract type information and handles for variables and
+  function invocations."""
+  match obj:
+    case Var():
+      if obj not in types:
+        types[cast(Var, obj)] = [Type()]
+    case Application():
+      assert obj not in types
+      for a in obj.code:
+        types = determine_types(a, types)
+      tf = TypeFunc(obj)
+      if obj.code[0] in types:
+        # This can only happen for variables
+        assert isinstance(obj.code[0], Var)
+        if not isinstance(types[obj.code[0]][0], TypeFunc):
+          types[obj.code[0]] = [tf]
+        else:
+          types[obj.code[0]].append(tf)
+      else:
+        types[obj.code[0]] = [tf]
+      types[obj] = [Type()]
+    case Lambda():
+      types = determine_types(obj.code, dict())
+    case Combinator():
+      raise RuntimeError("Combinator cannot be handled in collect_types")
+    case _:
+      raise NotImplementedError(f"Unexpected type #1 {type(obj)}")
+  return types
+
+
+def notation(obj: Obj, types: Dict[Obj, Type], gen: Vargen) -> str:
+  """Create a Haskell-like notation for the signature of the expression."""
+  match obj:
+    case Var():
+      assert obj in types
+      return str(types[obj].finalize(gen))
+    case Lambda():
+      l = []
+      if isinstance(obj.code, Var):
+        for p in obj.params:
+          if p in types:
+            l.append(str(types[p].finalize(gen)))
+          else:
+            l.append(str(Type().finalize(gen)))
+      else:
+        assert isinstance(obj.code, Application)
+        for p in obj.params:
+          assert p in types
+          match types[p]:
+            case TypeFunc():
+              args = cast(TypeFunc, types[p]).args
+              s = '('
+              for c in args.code[1:]:
+                s += f'{str(types[c].finalize(gen))} → '
+              ttype = types[args].finalize(gen)
+              l.append(f'{s}{str(ttype)})')
+            case Type():
+              rp = p.identical_to or p
+              l.append(f'{str(types[rp].finalize(gen))}')
+            case _:
+              raise NotImplementedError(f"Unexpected type #3 {type(types[p])}")
+        assert isinstance(types[obj.code], Type)
+      l.append(str(types[obj.code].finalize(gen)))
+      return ' → '.join(l)
+    case _:
+      raise NotImplementedError(f"Unexpected type #2 {type(obj)}")
+
+
+def mark_identical(l: Obj, r: Obj):
+  """If two objects are recognized after their creation to have the same type, mark them as identical."""
+  assert type(l) == type(r)
+  match l:
+    case Var():
+      cast(Var, r).identical_to = l
+    case _:
+      raise NotImplementedError(f"Unexpected type #3 {type(l)}")
+
+
+def to_typesig(expr: Obj, highlight: bool = False) -> str:
+  """Return a string representation for type signature of the expression."""
+  gen = Vargen()
+  if not isinstance(expr, Lambda):
+    assert isinstance(expr, Var) or isinstance(expr, Application)
+    t = Type()
+    t.finalize(gen)
+    return str(t)
+
+  types = determine_types(expr, dict())
+
+  stypes = {}
+  rtypes = {}
+  for k, t in types.items():
+    if len(t) != 1:
+      assert(all(isinstance(tt, TypeFunc) for tt in t))
+      for tt in t[1:]:
+        # We cannot modify types while iterating over it and we cannot add the corrected
+        # value to stypes because the iteration order might cause the value to be overwritten.
+        rtypes[cast(TypeFunc, tt).args] = types[cast(TypeFunc, t[0]).args][0]
+        assert cast(TypeFunc, t[0]).args.code[0] == cast(TypeFunc, tt).args.code[0]
+        for e in zip(cast(TypeFunc, t[0]).args.code[1:], cast(TypeFunc, tt).args.code[1:]):
+          mark_identical(e[0], e[1])
+    stypes[k] = t[0]
+
+  for e in rtypes:
+    stypes[e] = rtypes[e]
+
+  return notation(expr, stypes, gen)
+
+
 def handle(a: str, echo: bool) -> int:
   """Parse given string, simplify, and print the lambda expression."""
   ec = 0
   input_prompt = f'{COLORS["input_prompt"]}»{COLORS["off"]} '
   output_prompt = f'{COLORS["output_prompt"]}⇒{COLORS["off"]} ' if IS_TERMINAL else ''
+  typesig_prompt = f'{COLORS["output_prompt"]}🖊{COLORS["off"]} ' if IS_TERMINAL else ''
   separator_len = os.get_terminal_size()[0] if IS_TERMINAL else 72
 
   if echo and IS_TERMINAL:
     print(f'{input_prompt}{a}')
   try:
-    print(f'{output_prompt}{to_string(from_string(a), IS_TERMINAL)}')
+    expr = from_string(a)
+    print(f'{output_prompt}{to_string(expr, IS_TERMINAL)}')
+    print(f'{typesig_prompt}{to_typesig(expr, IS_TERMINAL)}')
   except SyntaxError as e:
     print(f'eval("{a}") failed: {e.args[0]}')
     ec = 1
@@ -631,7 +801,7 @@ def repl() -> int:
 
 def check() -> int:
   """Sanity checks.  Return error code that is used as the exit code of the process."""
-  checks = [
+  combinator_checks = [
     ('S K K', 'I'),
     ('K I', 'π'),
     ('K (S K K)', 'π'),
@@ -700,17 +870,44 @@ def check() -> int:
     ('B (a b) c', 'D a b c'),
   ]
   ec = 0
-  for testinput, expected in [(key, key) for key in KNOWN_COMBINATORS] + checks:
+  print('Combinator checks')
+  for testinput, expected in [(key, key) for key in KNOWN_COMBINATORS] + combinator_checks:
     resexpr = from_string(testinput)
     res = to_string(resexpr)
     if res != expected:
       if expected in KNOWN_COMBINATORS:
-        print(f'❌ {testinput} → {res} {resexpr} but {expected} {from_string(expected)} = {KNOWN_COMBINATORS[expected]} expected')
+        print(f'❌ {testinput} ⇒ {res} {resexpr} but {expected} {from_string(expected)} = {KNOWN_COMBINATORS[expected]} expected')
       else:
-        print(f'❌ {testinput} → {res} {resexpr} but {expected} {from_string(expected)} expected')
+        print(f'❌ {testinput} ⇒ {res} {resexpr} but {expected} {from_string(expected)} expected')
       ec = 1
     else:
-      print(f'✅ {testinput} → {res}')
+      print(f'✅ {testinput} ⇒ {res}')
+
+  signature_checks = [
+    ('B', '(a → b) → (c → a) → c → b'),
+    ('C', '(a → b → c) → b → a → c'),
+    ('C*', '(a → b → c → d) → a → c → b → d'),
+    ('I', 'a → a'),
+    ('I*', '(a → b) → a → b'),
+    ('K', 'a → b → a'),
+    ('Ψ', '(a → a → b) → (c → a) → c → c → b'),
+    ('Q', '(a → b) → (b → c) → a → c'),
+    ('R', 'a → (b → a → c) → b → c'),
+    ('R*', '(a → b → c → d) → c → a → b → d'),
+    ('S', '(a → b → c) → (a → b) → a → c'),
+    ('Φ', '(a → b → c) → (d → a) → (d → b) → d → c'),
+    ('T', 'a → (a → b) → b'),
+    ('W', '(a → a → b) → a → b'),
+  ]
+  print('\nSignature checks')
+  for testinput, expected in signature_checks:
+    resexpr = from_string(testinput)
+    res = to_typesig(resexpr)
+    if res != expected:
+      print(f'❌ {testinput} ⇒ {res} but {expected} expected')
+      ec = 1
+    else:
+      print(f'✅ {testinput} ⇒ {res}')
   return ec
 
 
