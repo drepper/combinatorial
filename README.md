@@ -29,6 +29,7 @@ python3 combinatorial.py BBK
 import combinator
 e=combinator.from_string('BBK')
 combinator.to_string(e)
+combinator.to_typesig(e)
 ```
 
 ## Functionality
@@ -43,6 +44,9 @@ not depend on any details of the implementation.
 The `Obj` object can be passed to the `to_string` function to obtain a string representation of the expression.
 For expressions which did not undergo any reduction, the `to_string` function returns the original string representation,
 unless a concise combinator representation is used.
+
+Furthermore, the `Obj` object can be passed to the `to_typesig` function which returns a string representing the
+type signature of the expression along the syntax used by Haskell.
 
 
 ## Currently Supported Combinators
@@ -108,6 +112,7 @@ Since this list also includes the `S` and `K` combinators one can use the code t
 $ python3 combinator.py '((S(K((S((SK)K))(K((S(K(S((SK)K))))K)))))((S(K((S(K((S(KS))K)))((S(KS))K))))((S(K(S((SK)K))))K)))'
 » ((S(K((S((SK)K))(K((S(K(S((SK)K))))K)))))((S(K((S(K((S(KS))K)))((S(KS))K))))((S(K(S((SK)K))))K)))
 ⇒ F
+🖊 a → b → (b → a → c) → c
 ```
 
 
@@ -116,8 +121,8 @@ $ python3 combinator.py '((S(K((S((SK)K))(K((S(K(S((SK)K))))K)))))((S(K((S(K((S(
 The handling of the `M` combinator (Mockingbird) and related once is *anything* but good.  The recursive nature needs
 to be handled differently.  At least the current implementation does not spiral out of control, most of the time.
 
-Additionally, the scanners requires that variables are represented by lowercase letters.  This is also and arbitrary choice
-but seems to be commonly used.  This limits the number of variables to 26, of cource.  It is easy enough to extend, just
+Additionally, the scanner requires that variables are represented by lowercase letters.  This is also and arbitrary choice
+but seems to be commonly used.  This limits the number of variables to 26, of course.  It is easy enough to extend, just
 modify the `VARIABLE_NAMES` string in the sources.  There should be no overlap with the characters used in combinators.
 
 Note that free variables limit the number of variables used throughout the expression further.  The names must be unique
