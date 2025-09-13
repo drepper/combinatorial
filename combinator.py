@@ -45,12 +45,12 @@ COLORS = {
         "output_prompt",
     ]
 }
-is_terminal = False
+is_terminal = False  # pylint: disable=invalid-name
 
 
 def init_terminal() -> None:
     """Initialize configuration to use terminal features."""
-    from colored import Fore, Style
+    from colored import Fore, Style  # pyright: ignore[reportMissingTypeStubs] pylint: disable=import-outside-toplevel
 
     global is_terminal  # pylint: disable=global-statement
     is_terminal = sys.stdout.isatty()
@@ -303,7 +303,7 @@ class Empty(Obj):
         return "{}"
 
     @override
-    def fmt(self, varmap: Naming, highlight: bool) -> str:
+    def fmt(self, varmap: Naming, highlight: bool) -> str:  # pylint: disable=unused-argument
         # This is a filler.  An object of this type should never really be used.
         return "○"
 
@@ -320,7 +320,7 @@ class Constant(Obj):
         return f"{{const {self.name}}}"
 
     @override
-    def fmt(self, varmap: Naming, highlight: bool) -> str:
+    def fmt(self, _varmap: Naming, _highlight: bool) -> str:
         return f"{self.name} "
 
 
@@ -333,7 +333,7 @@ class Combinator(Obj):
         self.arguments = [] if arguments is None else arguments
 
     @override
-    def is_free_in_context(self, v: Var) -> bool:
+    def is_free_in_context(self, _v: Var) -> bool:
         return True
 
     @override
@@ -406,7 +406,12 @@ class Application(Obj):
 
     @override
     def collect_free_vars(self) -> set[str]:
-        return set().union(*[e.collect_free_vars() for e in self.code])
+        # It would be good to write this code in one line as per code below but basedpyright complains.
+        #   return set().union(*[e.collect_free_vars() for e in self.code])
+        res: set[str] = set()
+        for e in self.code:
+            res |= e.collect_free_vars()
+        return res
 
     @override
     def get_apps(self) -> list[Obj]:
@@ -690,13 +695,14 @@ def to_string(expr: Obj, highlight: bool = False) -> str:
     ).rstrip()
 
 
-class Vargen:
+class Vargen:  # pylint: disable=too-few-public-methods
     """Class to generate unique, consecutive variable names."""
 
     def __init__(self):
         self.typeidx: int = 0
 
     def name(self):
+        "Generate the name."
         res = VARIABLE_NAMES[self.typeidx]
         self.typeidx += 1
         return res
@@ -761,7 +767,7 @@ def determine_types(obj: Obj, types: dict[Obj, list[Type]]) -> dict[Obj, list[Ty
                 types[obj.code[0]] = [tf]
             types[obj] = [Type()]
         case Lambda():
-            types = determine_types(obj.code, dict())
+            types = determine_types(obj.code, {})
         case Combinator():
             raise RuntimeError("Combinator cannot be handled in collect_types")
         case _:
@@ -798,10 +804,6 @@ def notation(obj: Obj, types: dict[Obj, Type], gen: Vargen) -> str:
                         case Type():
                             rp = p.identical_to or p
                             res.append(f"{str(types[rp].finalize(gen))}")
-                        case _:
-                            raise NotImplementedError(
-                                f"Unexpected type #3 {type(types[p])}"
-                            )
                 assert isinstance(types[obj.code], Type)
             res.append(str(types[obj.code].finalize(gen)))
             return " → ".join(res)
@@ -809,29 +811,28 @@ def notation(obj: Obj, types: dict[Obj, Type], gen: Vargen) -> str:
             raise NotImplementedError(f"Unexpected type #2 {type(obj)}")
 
 
-def mark_identical(l: Obj, r: Obj):
+def mark_identical(left: Obj, right: Obj):
     """If two objects are recognized after their creation to have the same type, mark them as identical."""
-    assert type(l) is type(r)
-    match l:
+    assert type(left) is type(right)
+    match left:
         case Var():
-            cast(Var, r).identical_to = l
+            cast(Var, right).identical_to = left
         case _:
-            raise NotImplementedError(f"Unexpected type #3 {type(l)}")
+            raise NotImplementedError(f"Unexpected type #3 {type(left)}")
 
 
 def to_typesig(expr: Obj, _highlight: bool = False) -> str:
     """Return a string representation for type signature of the expression."""
     gen = Vargen()
     if not isinstance(expr, Lambda):
-        assert isinstance(expr, Var) or isinstance(expr, Application)
+        assert isinstance(expr, (Var, Application))
         t = Type()
-        t.finalize(gen)
-        return str(t)
+        return str(t.finalize(gen))
 
-    types = determine_types(expr, dict())
+    types = determine_types(expr, {})
 
-    stypes = {}
-    rtypes = {}
+    stypes: dict[Obj, Type] = {}
+    rtypes: dict[Obj, Type] = {}
     for k, t in types.items():
         if len(t) != 1:
             assert all(isinstance(tt, TypeFunc) for tt in t)
@@ -848,7 +849,7 @@ def to_typesig(expr: Obj, _highlight: bool = False) -> str:
                     mark_identical(e[0], e[1])
         stypes[k] = t[0]
 
-    for e in rtypes:
+    for e in rtypes:  # pylint: disable=consider-using-dict-items
         stypes[e] = rtypes[e]
 
     return notation(expr, stypes, gen)
