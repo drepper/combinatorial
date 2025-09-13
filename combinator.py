@@ -146,6 +146,7 @@ KNOWN_COMBINATORS = {
     "C": "λabc.acb",
     "C*": "λabcd.abdc",
     "C**": "λabcde.abced",
+    "C#": "λabcd.a(b d)c",
     "D": "λabcd.ab(cd)",
     "D₁": "λabcde.abc(de)",
     "D₂": "λabcde.a(bc)(de)",
@@ -630,7 +631,7 @@ def get_constant(s: str) -> tuple[Obj, str]:
     # Find the longest known combinator that is a prefix of the token.
     for i in range(len(token), 0, -1):
         # If the token at this position would have one of the known suffixes it must include the latter.
-        if i < end_idx and token[i] in {"*", "₁", "₂", "₃", "₄", "¹"}:
+        if i < end_idx and token[i] in {"*", "₁", "₂", "₃", "₄", "¹", "#"}:
             continue
         prefix = token[:i]
         if prefix in KNOWN_COMBINATORS:
@@ -1003,7 +1004,7 @@ def check() -> int:
         ("S (K a) b", "B a b"),
         ("S a (K b)", "C a b"),
         ("S (B a b) c", "Φ a b c"),
-        # ('C (B a b) c', 'C# a b c'), # where 'C# = λabcd.a(b d)c'
+        ("C (B a b) c", "C# a b c"),
         ("B (a b) c", "D a b c"),
     ]
     ec = 0
