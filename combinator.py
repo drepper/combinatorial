@@ -233,6 +233,10 @@ class Obj:
         """Return a set of all the variables that are free for the entire expression."""
         return set()
 
+    def collect_free_exprs(self) -> list[Obj]:
+        """Return a set of all the expressions that consists only of free variables."""
+        return list()
+
     def get_apps(self) -> list[Obj]:
         """Return a list of all the applications in the expression."""
         return []
@@ -292,6 +296,10 @@ class Var(Obj):
     @override
     def collect_free_vars(self) -> set[str]:
         return set(self.freename) if self.freename else set()
+
+    @override
+    def collect_free_exprs(self) -> list[Obj]:
+        return [self] if self.freename else []
 
 
 @final
@@ -399,6 +407,8 @@ class Application(Obj):
 
     @override
     def rmatch(self, other: Obj, var_map: dict[Var, Obj]) -> bool:
+        if isinstance(other, Var) and other in var_map:
+            other = var_map[other]
         return (
             isinstance(other, Application)
             and len(self.code) == len(other.code)
@@ -412,6 +422,20 @@ class Application(Obj):
         res: set[str] = set()
         for e in self.code:
             res |= e.collect_free_vars()
+        return res
+
+    @override
+    def collect_free_exprs(self) -> list[Obj]:
+        res: list[Obj] = []
+        all = True
+        for e in self.code:
+            rres = e.collect_free_exprs()
+            all &= e in rres
+            for r in rres:
+                if r not in res:
+                    res.append(r)
+        if all:
+            res.append(self)
         return res
 
     @override
@@ -479,6 +503,7 @@ class Lambda(Obj):
 
     @override
     def recombine(self) -> Obj:
+        free_exprs = self.collect_free_exprs()
         rself = Lambda(self.params, self.code.recombine())
         for comb, combstr in KNOWN_COMBINATORS.items():
             combexpr = from_string(combstr)
@@ -493,9 +518,15 @@ class Lambda(Obj):
                 # We are interested in simplifications which do not introduce deeper levels of nesting.  This means
                 # we do not have to perform exhaustive recursive searches.
                 # TODO: we need to recognize the simplification like those by Augustsson
+                #   S (K a) (K b) -> λc.ab -> K (a b)
                 #   S (K a) b -> λc.a(bc) -> B a b
                 # I.e., we create a combinator use where free variables are used as constant parameters
-                pass
+                for fixed_params in itertools.product(
+                    free_exprs, repeat=len(combexpr.params) - len(self.params)
+                ):
+                    param_map = {p[0]: p[1] for p in zip(combexpr.params, fixed_params)}
+                    if self.rmatch(combexpr, param_map):
+                        return Combinator(comb, list(fixed_params))
         return rself
 
     @override
@@ -503,21 +534,30 @@ class Lambda(Obj):
         if not isinstance(other, Lambda):
             return False
         newvar_map = var_map.copy()
-        for param, newparam in zip(self.params, other.params):
+        # We reverse the parameters in case the self lambda has fewer parameters which have been filled
+        # with expressions consisting of free variables in recombine.
+        for param, newparam in zip(reversed(self.params), reversed(other.params)):
             assert newparam not in newvar_map
             assert param not in newvar_map
             newvar_map[newparam] = param
+        assert all(p in newvar_map for p in other.params)
         if self.code.rmatch(other.code, newvar_map):
             # Propagate the newly found values back to the caller.
             for k in var_map:
                 if isinstance(var_map[k], Empty):
                     var_map[k] = newvar_map[k]
+                else:
+                    assert var_map[k] == newvar_map[k]
             return True
         return False
 
     @override
     def collect_free_vars(self) -> set[str]:
         return self.code.collect_free_vars()
+
+    @override
+    def collect_free_exprs(self) -> list[Obj]:
+        return self.code.collect_free_exprs()
 
     @override
     def get_apps(self) -> list[Obj]:
@@ -968,14 +1008,12 @@ def check() -> int:
         # ('C (B a b) c', 'C# a b c'), # where 'C# = λabcd.a(b d)c'
         ("B (a b) c", "D a b c"),
     ]
-    # Only the first simplification test works so far.
-    simplication_ok = 1
     ec = 0
     print("Combinator checks")
     all_tests = (
         [(key, key) for key in KNOWN_COMBINATORS]
         + combinator_checks
-        + simplification_checks[:simplication_ok]
+        + simplification_checks
     )
     for testinput, expected in all_tests:
         resexpr = from_string(testinput)
