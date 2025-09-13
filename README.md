@@ -77,6 +77,7 @@ such as ₁ or *, are hardcoded in the scanner code.  But the list of suffixes i
 |I| λa.a|
 |I*| λab.ab|
 |I**| λabc.abc|
+|ɩ| λa.aSK|
 |J| λabcd.ab(adc)|
 |K| λab.a|
 |L| λab.a(bb)|
@@ -108,7 +109,7 @@ such as ₁ or *, are hardcoded in the scanner code.  But the list of suffixes i
 
 Since this list also includes the `S` and `K` combinators one can use the code to verify the reductions:
 
-```
+```bash
 $ python3 combinator.py '((S(K((S((SK)K))(K((S(K(S((SK)K))))K)))))((S(K((S(K((S(KS))K)))((S(KS))K))))((S(K(S((SK)K))))K)))'
 » ((S(K((S((SK)K))(K((S(K(S((SK)K))))K)))))((S(K((S(K((S(KS))K)))((S(KS))K))))((S(K(S((SK)K))))K)))
 ⇒ F
