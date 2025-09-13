@@ -515,9 +515,7 @@ class Lambda(Obj):
                         [],
                     )
             elif len(self.params) < len(combexpr.params):
-                # We are interested in simplifications which do not introduce deeper levels of nesting.  This means
-                # we do not have to perform exhaustive recursive searches.
-                # TODO: we need to recognize the simplification like those by Augustsson
+                # Recognize simplification like those by Augustsson
                 #   S (K a) (K b) -> λc.ab -> K (a b)
                 #   S (K a) b -> λc.a(bc) -> B a b
                 # I.e., we create a combinator use where free variables are used as constant parameters
