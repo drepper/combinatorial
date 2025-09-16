@@ -792,6 +792,9 @@ def determine_types(obj: Obj, types: dict[Obj, list[Type]]) -> dict[Obj, list[Ty
             types[obj] = [Type()]
         case Lambda():
             types = determine_types(obj.code, {})
+            for p in obj.params:
+                if p not in types:
+                    types[p] = [Type()]
         case Combinator():
             raise RuntimeError("Combinator cannot be handled in collect_types")
         case _:
@@ -853,6 +856,12 @@ def to_typesig(expr: Obj, _highlight: bool = False) -> str:
         t = Type()
         return str(t.finalize(gen))
 
+    # types is a dictionary associating the expression and subexpression objects with deduced
+    # types.  E.g., for
+    #    λabc.ab
+    # the dictionary contains a
+    #   {Var(a): [TypeFunc({App {Var(a)} {Var(b)}})], Var(b): [Type(None)], Var(c): [Type(None)], {App {Var(a)} {Var(b)}}: [Type(None)]}
+    # Type(None) indicates that no type is assigned yet.
     types = determine_types(expr, {})
 
     stypes: dict[Obj, Type] = {}
@@ -873,8 +882,11 @@ def to_typesig(expr: Obj, _highlight: bool = False) -> str:
                     mark_identical(e[0], e[1])
         stypes[k] = t[0]
 
-    for e in rtypes:  # pylint: disable=consider-using-dict-items
-        stypes[e] = rtypes[e]
+    # Give preference to the types determined through the function call matching
+    for k, v in rtypes.items():
+        stypes[k] = v
+    # Just to make sure it is known that rtypes is not used after this point
+    del rtypes
 
     return notation(expr, stypes, gen)
 
@@ -1045,6 +1057,7 @@ def check() -> int:
         ("Φ", "(a → b → c) → (d → a) → (d → b) → d → c"),
         ("T", "a → (a → b) → b"),
         ("W", "(a → a → b) → a → b"),
+        ("BK", "(a → b) → a → c → b"),
     ]
     print("\nSignature checks")
     for testinput, expected in signature_checks:
