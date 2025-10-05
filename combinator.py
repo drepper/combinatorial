@@ -118,9 +118,7 @@ class Naming:
         """Add definitions from other variable set to own."""
         assert self.avoid == other.avoid, "avoid sets must be equal"
         if other.known:
-            self.next = VARIABLE_NAMES[
-                max(VARIABLE_NAMES.index(self.next), VARIABLE_NAMES.index(other.next))
-            ]
+            self.next = VARIABLE_NAMES[max(VARIABLE_NAMES.index(self.next), VARIABLE_NAMES.index(other.next))]
             assert not set(self.known.keys()) & set(other.known.keys())
             self.known = self.known | other.known
 
@@ -242,6 +240,10 @@ class Obj:
         """Return a list of all the applications in the expression."""
         return []
 
+    def unify_names(self) -> None:
+        """Unify matched variable names."""
+        pass
+
 
 @final
 class Var(Obj):
@@ -253,7 +255,7 @@ class Var(Obj):
     def __init__(self, freename: str | None = None):
         self.id = Var.varcnt
         self.freename = freename
-        self.identical_to: Var | None = None
+        self.identical_to: Var | Application | None = None
         Var.varcnt += 1
 
     @override
@@ -264,20 +266,12 @@ class Var(Obj):
 
     @override
     def __str__(self):
-        return (
-            f"{{var {self.id} → {self.identical_to.id}}}"
-            if self.identical_to
-            else f"{{var {self.id}}}"
-        )
+        return f"{{var {self.id} → {self.identical_to.id if isinstance(self.identical_to, Var) else 'app'}}}" if self.identical_to else f"{{var {self.id}}}"
 
     @override
     def fmt(self, varmap: Naming, highlight: bool) -> str:
         res = self.freename or varmap.get(self)
-        return (
-            f"{COLORS['freevar' if self.freename else 'var']}{res}{COLORS['off']}"
-            if highlight
-            else res
-        )
+        return f"{COLORS['freevar' if self.freename else 'var']}{res}{COLORS['off']}" if highlight else res
 
     @override
     def replace(self, v: Var, expr: Obj) -> Obj:
@@ -354,15 +348,9 @@ class Combinator(Obj):
 
     @override
     def fmt(self, varmap: Naming, highlight: bool) -> str:
-        combres = (
-            f"{COLORS['combinator']}{self.combinator}{COLORS['off']}"
-            if highlight
-            else self.combinator
-        )
+        combres = f"{COLORS['combinator']}{self.combinator}{COLORS['off']}" if highlight else self.combinator
         if self.arguments:
-            combres += " " + " ".join(
-                [a.fmt(varmap, highlight) for a in self.arguments]
-            )
+            combres += " " + " ".join([a.fmt(varmap, highlight) for a in self.arguments])
         return combres
 
     @override
@@ -377,10 +365,9 @@ class Application(Obj):
 
     def __init__(self, ls: list[Obj]):
         assert len(ls) >= 2
-        self.code: list[Obj] = (
-            (ls[0].code + ls[1:]) if isinstance(ls[0], Application) else ls
-        )
+        self.code: list[Obj] = (ls[0].code + ls[1:]) if isinstance(ls[0], Application) else ls
         assert self.code
+        self.identical_to: Var | Application | None = None
 
     @override
     def is_free_in_context(self, v: Var) -> bool:
@@ -410,11 +397,7 @@ class Application(Obj):
     def rmatch(self, other: Obj, var_map: dict[Var, Obj]) -> bool:
         if isinstance(other, Var) and other in var_map:
             other = var_map[other]
-        return (
-            isinstance(other, Application)
-            and len(self.code) == len(other.code)
-            and all(a.rmatch(b, var_map) for a, b in zip(self.code, other.code))
-        )
+        return isinstance(other, Application) and len(self.code) == len(other.code) and all(a.rmatch(b, var_map) for a, b in zip(self.code, other.code))
 
     @override
     def collect_free_vars(self) -> set[str]:
@@ -441,9 +424,16 @@ class Application(Obj):
 
     @override
     def get_apps(self) -> list[Obj]:
-        return [self] + list(
-            itertools.chain.from_iterable(a.get_apps() for a in self.code)
-        )
+        return [self] + list(itertools.chain.from_iterable(a.get_apps() for a in self.code))
+
+    @override
+    def unify_names(self) -> None:
+        for i, e in enumerate(self.code):
+            if isinstance(e, Var):
+                if e.identical_to and isinstance(e.identical_to, Var):
+                    self.code[i] = e.identical_to
+            else:
+                e.unify_names()
 
     def beta(self) -> Obj:
         """Perform beta reduction on the given application.  This is called on a freshly
@@ -497,9 +487,7 @@ class Lambda(Obj):
     @override
     def duplicate(self) -> Obj:
         newparams = [Var() for _ in self.params]
-        newcode = functools.reduce(
-            lambda p, o: p.replace(*o), zip(self.params, newparams), self.code
-        )
+        newcode = functools.reduce(lambda p, o: p.replace(*o), zip(self.params, newparams), self.code)
         return newlambda(newparams, newcode)
 
     @override
@@ -520,9 +508,7 @@ class Lambda(Obj):
                 #   S (K a) (K b) -> λc.ab -> K (a b)
                 #   S (K a) b -> λc.a(bc) -> B a b
                 # I.e., we create a combinator use where free variables are used as constant parameters
-                for fixed_params in itertools.product(
-                    free_exprs, repeat=len(combexpr.params) - len(self.params)
-                ):
+                for fixed_params in itertools.product(free_exprs, repeat=len(combexpr.params) - len(self.params)):
                     param_map = {p[0]: p[1] for p in zip(combexpr.params, fixed_params)}
                     if self.rmatch(combexpr, param_map):
                         return Combinator(comb, list(fixed_params))
@@ -561,6 +547,13 @@ class Lambda(Obj):
     @override
     def get_apps(self) -> list[Obj]:
         return self.code.get_apps()
+
+    @override
+    def unify_names(self) -> None:
+        for i, e in enumerate(self.params):
+            if e.identical_to and isinstance(e.identical_to, Var):
+                self.params[i] = e.identical_to
+        self.code.unify_names()
 
 
 def parse_lambda(s: str, ctx: dict[str, Var]) -> tuple[Obj, str]:
@@ -666,9 +659,7 @@ def newlambda(params: list[Var], code: Obj) -> Obj:
     just apply the required parameter(s) to the application value in order."""
     if isinstance(code, Application) and len(params) < len(code.code):
         ncode = len(code.code) - len(params)
-        if params == code.code[ncode:] and all(
-            c.is_free_in_context(e) for e in params for c in code.code[:ncode]
-        ):
+        if params == code.code[ncode:] and all(c.is_free_in_context(e) for e in params for c in code.code[:ncode]):
             return code.code[0] if ncode == 1 else Application(code.code[:ncode])
     return Lambda(params, code)
 
@@ -714,9 +705,7 @@ def from_string(s: str) -> Obj:
 
 def to_string(expr: Obj, highlight: bool = False) -> str:
     """Return a string representation for the lambda expression graph."""
-    return remove_braces(
-        expr.recombine().fmt(Naming(expr.collect_free_vars()), highlight)
-    ).rstrip()
+    return remove_braces(expr.recombine().fmt(Naming(expr.collect_free_vars()), highlight)).rstrip()
 
 
 class Vargen:  # pylint: disable=too-few-public-methods
@@ -802,20 +791,25 @@ def determine_types(obj: Obj, types: dict[Obj, list[Type]]) -> dict[Obj, list[Ty
     return types
 
 
+def type_resolve(obj: Var | Application) -> Var | Application:
+    while obj.identical_to:
+        obj = obj.identical_to
+    return obj
+
+
 def notation(obj: Obj, types: dict[Obj, Type], gen: Vargen) -> str:
     """Create a Haskell-like notation for the signature of the expression."""
     match obj:
         case Var():
             assert obj in types
+            if obj.identical_to:
+                return notation(obj.identical_to, types, gen)
             return str(types[obj].finalize(gen))
         case Lambda():
             res: list[str] = []
             if isinstance(obj.code, Var):
                 for p in obj.params:
-                    if p in types:
-                        res.append(str(types[p].finalize(gen)))
-                    else:
-                        res.append(str(Type().finalize(gen)))
+                    res.append(notation(p, types, gen))
             else:
                 assert isinstance(obj.code, Application)
                 for p in obj.params:
@@ -825,27 +819,37 @@ def notation(obj: Obj, types: dict[Obj, Type], gen: Vargen) -> str:
                             args = cast(TypeFunc, types[p]).args
                             s = "("
                             for c in args.code[1:]:
-                                s += f"{str(types[c].finalize(gen))} → "
-                            ttype = types[args].finalize(gen)
+                                s += f"{notation(c, types, gen)} → "
+                            ttype = types[type_resolve(args)].finalize(gen)
                             res.append(f"{s}{str(ttype)})")
                         case Type():
-                            rp = p.identical_to or p
+                            rp = type_resolve(p)
                             res.append(f"{str(types[rp].finalize(gen))}")
                 assert isinstance(types[obj.code], Type)
-            res.append(str(types[obj.code].finalize(gen)))
+            res.append(notation(obj.code, types, gen))
             return " → ".join(res)
+        case Application():
+            assert obj in types
+            if obj.identical_to:
+                return notation(obj.identical_to, types, gen)
+            return str(types[obj].finalize(gen))
         case _:
             raise NotImplementedError(f"Unexpected type #2 {type(obj)}")
 
 
 def mark_identical(left: Obj, right: Obj):
     """If two objects are recognized after their creation to have the same type, mark them as identical."""
-    assert type(left) is type(right)
-    match left:
-        case Var():
-            cast(Var, right).identical_to = left
-        case _:
-            raise NotImplementedError(f"Unexpected type #3 {type(left)}")
+    if not isinstance(left, Var) and not isinstance(left, Application):
+        raise NotImplementedError(f"Unexpected types #3 {type(left)}")
+    if not isinstance(right, Var) and not isinstance(right, Application):
+        raise NotImplementedError(f"Unexpected types #3a {type(right)}")
+    if isinstance(left, Var):
+        right.identical_to = left
+    elif isinstance(right, Var):
+        left.identical_to = right
+    else:
+        assert isinstance(left, Application) and isinstance(right, Application)
+        left.identical_to = right
 
 
 def to_typesig(expr: Obj, _highlight: bool = False) -> str:
@@ -863,7 +867,6 @@ def to_typesig(expr: Obj, _highlight: bool = False) -> str:
     #   {Var(a): [TypeFunc({App {Var(a)} {Var(b)}})], Var(b): [Type(None)], Var(c): [Type(None)], {App {Var(a)} {Var(b)}}: [Type(None)]}
     # Type(None) indicates that no type is assigned yet.
     types = determine_types(expr, {})
-
     stypes: dict[Obj, Type] = {}
     rtypes: dict[Obj, Type] = {}
     for k, t in types.items():
@@ -873,20 +876,22 @@ def to_typesig(expr: Obj, _highlight: bool = False) -> str:
                 # We cannot modify types while iterating over it and we cannot add the corrected
                 # value to stypes because the iteration order might cause the value to be overwritten.
                 rtypes[cast(TypeFunc, tt).args] = types[cast(TypeFunc, t[0]).args][0]
-                assert (
-                    cast(TypeFunc, t[0]).args.code[0] == cast(TypeFunc, tt).args.code[0]
-                )
-                for e in zip(
-                    cast(TypeFunc, t[0]).args.code[1:], cast(TypeFunc, tt).args.code[1:]
-                ):
+                assert cast(TypeFunc, t[0]).args.code[0] == cast(TypeFunc, tt).args.code[0]
+                if len(cast(TypeFunc, t[0]).args.code) != len(cast(TypeFunc, tt).args.code):
+                    raise NotImplementedError("unequal number of parameters of matching invocations")
+                for e in zip(cast(TypeFunc, t[0]).args.code[1:], cast(TypeFunc, tt).args.code[1:]):
                     mark_identical(e[0], e[1])
+                mark_identical(cast(TypeFunc, tt).args, cast(TypeFunc, t[0]).args)
         stypes[k] = t[0]
 
     # Give preference to the types determined through the function call matching
     for k, v in rtypes.items():
         stypes[k] = v
-    # Just to make sure it is known that rtypes is not used after this point
+    # Just to make sure it is known that types and rtypes are not used after this point
+    del types
     del rtypes
+
+    expr.unify_names()
 
     return notation(expr, stypes, gen)
 
@@ -896,9 +901,7 @@ def handle(a: str, echo: bool) -> int:
     ec = 0
     input_prompt = f"{COLORS['input_prompt']}»{COLORS['off']} "
     output_prompt = f"{COLORS['output_prompt']}⇒{COLORS['off']} " if is_terminal else ""
-    typesig_prompt = (
-        f"{COLORS['output_prompt']}🖊{COLORS['off']} " if is_terminal else ""
-    )
+    typesig_prompt = f"{COLORS['output_prompt']}🖊{COLORS['off']} " if is_terminal else ""
     separator_len = os.get_terminal_size()[0] if is_terminal else 72
 
     if echo and is_terminal:
@@ -1021,23 +1024,15 @@ def check() -> int:
     ]
     ec = 0
     print("Combinator checks")
-    all_tests = (
-        [(key, key) for key in KNOWN_COMBINATORS]
-        + combinator_checks
-        + simplification_checks
-    )
+    all_tests = [(key, key) for key in KNOWN_COMBINATORS] + combinator_checks + simplification_checks
     for testinput, expected in all_tests:
         resexpr = from_string(testinput)
         res = to_string(resexpr)
         if res != expected:
             if expected in KNOWN_COMBINATORS:
-                print(
-                    f"❌ {testinput} ⇒ {res} {resexpr} but {expected} {from_string(expected)} = {KNOWN_COMBINATORS[expected]} expected"
-                )
+                print(f"❌ {testinput} ⇒ {res} {resexpr} but {expected} {from_string(expected)} = {KNOWN_COMBINATORS[expected]} expected")
             else:
-                print(
-                    f"❌ {testinput} ⇒ {res} {resexpr} but {expected} {from_string(expected)} expected"
-                )
+                print(f"❌ {testinput} ⇒ {res} {resexpr} but {expected} {from_string(expected)} expected")
             ec = 1
         else:
             print(f"✅ {testinput} ⇒ {res}")
@@ -1065,7 +1060,7 @@ def check() -> int:
         ("I*", "(a → b) → a → b"),
         ("I**", "(a → b → c) → a → b → c"),
         # ɩ
-        # J
+        ("J", "(a → b → b) → a → b → a → b"),
         ("K", "a → b → a"),
         # L
         # M
