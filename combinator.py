@@ -30,8 +30,7 @@ import functools
 import itertools
 import os
 import sys
-from typing import cast, ClassVar, final, override, Self
-
+from typing import ClassVar, Self, cast, final, override
 
 COLORS = {
     n: ""
@@ -795,6 +794,7 @@ def determine_types(obj: Obj, types: dict[Obj, list[Type]]) -> dict[Obj, list[Ty
 
 
 def type_resolve(obj: Var | Application) -> Var | Application:
+    """Determine the actual, non-aliased type of the object."""
     while obj.identical_to:
         obj = obj.identical_to
     return obj
@@ -899,7 +899,27 @@ def to_typesig(expr: Obj, _highlight: bool = False) -> str:
     return notation(expr, stypes, gen)
 
 
-def handle(a: str, echo: bool) -> int:
+def decode_number(expr: Obj) -> str:
+    """Decode Church encoding for numbers."""
+    res = ""
+    if isinstance(expr, Lambda):
+        la = cast(Lambda, expr)
+        if len(la.params) == 2:
+            c = la.code
+            n = 0
+            while c != la.params[1]:
+                if not isinstance(c, Application):
+                    return ""
+                a = cast(Application, c)
+                if len(a.code) != 2 or a.code[0] != la.params[0]:
+                    return ""
+                c = a.code[1]
+                n += 1
+            res = str(n)
+    return res
+
+
+def handle(a: str, church: bool, echo: bool) -> int:
     """Parse given string, simplify, and print the lambda expression."""
     ec = 0
     input_prompt = f"{COLORS['input_prompt']}»{COLORS['off']} "
@@ -911,7 +931,12 @@ def handle(a: str, echo: bool) -> int:
         print(f"{input_prompt}{a}")
     try:
         expr = from_string(a)
-        print(f"{output_prompt}{to_string(expr, is_terminal)}")
+        number = ""
+        if church:
+            number = decode_number(expr)
+            if number:
+                number = f" = {number}"
+        print(f"{output_prompt}{to_string(expr, is_terminal)}{number}")
         print(f"{typesig_prompt}{to_typesig(expr, is_terminal)}")
     except SyntaxError as e:
         print(f'eval("{a}") failed: {e.args[0]}')
@@ -921,7 +946,7 @@ def handle(a: str, echo: bool) -> int:
     return ec
 
 
-def repl() -> int:
+def repl(church: bool) -> int:
     """This is the REPL."""
     ec = 0
     try:
@@ -930,7 +955,7 @@ def repl() -> int:
             s = input(input_prefix)
             if not s:
                 break
-            ec = ec | handle(s, False)
+            ec = ec | handle(s, church, False)
     except EOFError:
         print("")
     return ec
@@ -1109,6 +1134,7 @@ def main() -> None:
     """Called as main function of the program."""
     parser = argparse.ArgumentParser()
     _ = parser.add_argument("--check", dest="check", action="store_true")
+    _ = parser.add_argument("--church", dest="church", action="store_true")
     _ = parser.add_argument("expression", metavar="expression", type=str, nargs="*")
     args = parser.parse_args()
 
@@ -1119,9 +1145,9 @@ def main() -> None:
     else:
         init_terminal()
         if cast(str, args.expression):
-            ec = handle(" ".join(cast(str, args.expression)), True)
+            ec = handle(" ".join(cast(str, args.expression)), args.church, True)
         else:
-            ec = repl()
+            ec = repl(args.church)
     sys.exit(ec)
 
 
