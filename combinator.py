@@ -86,6 +86,9 @@ def init_terminal() -> None:
 # are used for non-variables and conflicts would be fatal.
 VARIABLE_NAMES = "abcdefghijklmnopqrstuvwxyz"
 
+# For type signature we can use the uppercase characters.
+TYPE_NAMES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
 
 class Naming:
     """This is an object encapsulating the predictable generation of distinct
@@ -716,7 +719,7 @@ class Vargen:  # pylint: disable=too-few-public-methods
 
     def name(self):
         "Generate the name."
-        res = VARIABLE_NAMES[self.typeidx]
+        res = TYPE_NAMES[self.typeidx]
         self.typeidx += 1
         return res
 
@@ -1038,57 +1041,57 @@ def check() -> int:
             print(f"✅ {testinput} ⇒ {res}")
 
     signature_checks = [
-        ("B", "(a → b) → (c → a) → c → b"),
-        ("B₁", "(a → b) → (c → d → a) → c → d → b"),
-        ("B₂", "(a → b) → (c → d → e → a) → c → d → e → b"),
-        ("B₃", "(a → b) → (c → a) → (d → c) → d → b"),
-        ("C", "(a → b → c) → b → a → c"),
-        ("C*", "(a → b → c → d) → a → c → b → d"),
-        ("C**", "(a → b → c → d → e) → a → b → d → c → e"),
-        ("C#", "(a → b → c) → (d → a) → b → d → c"),
-        ("D", "(a → b → c) → a → (d → b) → d → c"),
-        ("D₁", "(a → b → c → d) → a → b → (e → c) → e → d"),
-        ("D₂", "(a → b → c) → (d → a) → d → (e → b) → e → c"),
-        ("E", "(a → b → c) → a → (d → e → b) → d → e → c"),
-        ("Ê", "(a → b → c) → (d → e → a) → d → e → (f → g → b) → f → g → c"),
-        ("F", "a → b → (b → a → c) → c"),
-        ("F*", "(a → b → c → d) → c → b → a → d"),
-        ("F**", "(a → b → c → d → e) → a → d → c → b → e"),
-        ("G", "(a → b → c) → (d → b) → d → a → c"),
-        ("H", "(a → b → a → c) → a → b → c"),
-        ("I", "a → a"),
-        ("I*", "(a → b) → a → b"),
-        ("I**", "(a → b → c) → a → b → c"),
+        ("B", "(A → B) → (C → A) → C → B"),
+        ("B₁", "(A → B) → (C → D → A) → C → D → B"),
+        ("B₂", "(A → B) → (C → D → E → A) → C → D → E → B"),
+        ("B₃", "(A → B) → (C → A) → (D → C) → D → B"),
+        ("C", "(A → B → C) → B → A → C"),
+        ("C*", "(A → B → C → D) → A → C → B → D"),
+        ("C**", "(A → B → C → D → E) → A → B → D → C → E"),
+        ("C#", "(A → B → C) → (D → A) → B → D → C"),
+        ("D", "(A → B → C) → A → (D → B) → D → C"),
+        ("D₁", "(A → B → C → D) → A → B → (E → C) → E → D"),
+        ("D₂", "(A → B → C) → (D → A) → D → (E → B) → E → C"),
+        ("E", "(A → B → C) → A → (D → E → B) → D → E → C"),
+        ("Ê", "(A → B → C) → (D → E → A) → D → E → (F → G → B) → F → G → C"),
+        ("F", "A → B → (B → A → C) → C"),
+        ("F*", "(A → B → C → D) → C → B → A → D"),
+        ("F**", "(A → B → C → D → E) → A → D → C → B → E"),
+        ("G", "(A → B → C) → (D → B) → D → A → C"),
+        ("H", "(A → B → A → C) → A → B → C"),
+        ("I", "A → A"),
+        ("I*", "(A → B) → A → B"),
+        ("I**", "(A → B → C) → A → B → C"),
         # ɩ
-        ("J", "(a → b → b) → a → b → a → b"),
-        ("K", "a → b → a"),
+        ("J", "(A → B → B) → A → B → A → B"),
+        ("K", "A → B → A"),
         # L
         # M
         # M₂
         # O
-        ("π", "a → b → b"),
-        ("Φ", "(a → b → c) → (d → a) → (d → b) → d → c"),
-        ("Φ₁", "(a → b → c) → (d → e → a) → (d → e → b) → d → e → c"),
-        ("Ψ", "(a → a → b) → (c → a) → c → c → b"),
-        ("Q", "(a → b) → (b → c) → a → c"),
-        ("Q₁", "(a → b) → c → (c → a) → b"),
-        ("Q₂", "a → (b → c) → (a → b) → c"),
-        ("Q₃", "(a → b) → a → (b → c) → c"),
-        ("Q₄", "a → (a → b) → (b → c) → c"),
-        ("R", "a → (b → a → c) → b → c"),
-        ("R*", "(a → b → c → d) → c → a → b → d"),
-        ("R**", "(a → b → c → d → e) → a → d → b → c → e"),
-        ("S", "(a → b → c) → (a → b) → a → c"),
-        ("T", "a → (a → b) → b"),
+        ("π", "A → B → B"),
+        ("Φ", "(A → B → C) → (D → A) → (D → B) → D → C"),
+        ("Φ₁", "(A → B → C) → (D → E → A) → (D → E → B) → D → E → C"),
+        ("Ψ", "(A → A → B) → (C → A) → C → C → B"),
+        ("Q", "(A → B) → (B → C) → A → C"),
+        ("Q₁", "(A → B) → C → (C → A) → B"),
+        ("Q₂", "A → (B → C) → (A → B) → C"),
+        ("Q₃", "(A → B) → A → (B → C) → C"),
+        ("Q₄", "A → (A → B) → (B → C) → C"),
+        ("R", "A → (B → A → C) → B → C"),
+        ("R*", "(A → B → C → D) → C → A → B → D"),
+        ("R**", "(A → B → C → D → E) → A → D → B → C → E"),
+        ("S", "(A → B → C) → (A → B) → A → C"),
+        ("T", "A → (A → B) → B"),
         # U
-        ("V", "a → b → (a → b → c) → c"),
-        ("V*", "(a → b → c → d) → b → c → a → d"),
-        ("V**", "(a → b → c → d → e) → a → c → d → b → e"),
-        ("W", "(a → a → b) → a → b"),
-        ("W¹", "a → (a → a → b) → b"),
-        ("W*", "(a → b → b → c) → a → b → c"),
-        ("W**", "(a → b → c → c → d) → a → b → c → d"),
-        ("BK", "(a → b) → a → c → b"),
+        ("V", "A → B → (A → B → C) → C"),
+        ("V*", "(A → B → C → D) → B → C → A → D"),
+        ("V**", "(A → B → C → D → E) → A → C → D → B → E"),
+        ("W", "(A → A → B) → A → B"),
+        ("W¹", "A → (A → A → B) → B"),
+        ("W*", "(A → B → B → C) → A → B → C"),
+        ("W**", "(A → B → C → C → D) → A → B → C → D"),
+        ("BK", "(A → B) → A → C → B"),
     ]
     print("\nSignature checks")
     for testinput, expected in signature_checks:
