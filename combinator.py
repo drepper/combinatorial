@@ -236,7 +236,7 @@ class Obj:
 
     def collect_free_exprs(self) -> list[Obj]:
         """Return a set of all the expressions that consists only of free variables."""
-        return list()
+        return []
 
     def get_apps(self) -> list[Obj]:
         """Return a list of all the applications in the expression."""
@@ -244,7 +244,7 @@ class Obj:
 
     def unify_names(self) -> None:
         """Unify matched variable names."""
-        pass
+        pass  # pylint: disable=unnecessary-pass
 
 
 @final
@@ -413,14 +413,14 @@ class Application(Obj):
     @override
     def collect_free_exprs(self) -> list[Obj]:
         res: list[Obj] = []
-        all = True
+        all_free = True
         for e in self.code:
             rres = e.collect_free_exprs()
-            all &= e in rres
+            all_free &= e in rres
             for r in rres:
                 if r not in res:
                     res.append(r)
-        if all:
+        if all_free:
             res.append(self)
         return res
 
@@ -604,7 +604,7 @@ def parse_paren(s: str, ctx: dict[str, Var]) -> tuple[Obj, str]:
         if s[end] == ")":
             if depth == 0:
                 res = parse_top(s[start:end], ctx)
-                return res, s[end + 1 :]
+                return res, s[end + 1:]
             depth -= 1
         if s[end] == "(":
             depth += 1
@@ -717,7 +717,7 @@ class Vargen:  # pylint: disable=too-few-public-methods
         self.typeidx: int = 0
 
     def name(self):
-        "Generate the name."
+        """Generate the name."""
         res = TYPE_NAMES[self.typeidx]
         self.typeidx += 1
         return res
