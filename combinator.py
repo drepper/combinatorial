@@ -263,7 +263,7 @@ class Var(Obj):
     @override
     def is_free_in_context(self, v: Var) -> bool:
         """Test whether this is a free variable.  If we come here and this is the variable
-        we are looking for it is indeed free in the context."""
+        we are looking for it is *not* free in the context."""
         return self.id != v.id
 
     @override
