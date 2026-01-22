@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright © 2025 Ulrich Drepper <drepper@akkadia.org>
+# Copyright © 2026 Ulrich Drepper <drepper@akkadia.org>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
