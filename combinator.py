@@ -138,7 +138,7 @@ class Naming:
 # These correspond to the Smullyan's "To Mock a Mockingbird".
 # The list can be extended.  The names are used in translation from the
 # input and when printing the result.
-KNOWN_COMBINATORS = {
+KNOWN_COMBINATORS: dict[str, str] = {
     "B": "λabc.a(bc)",
     "B₁": "λabcd.a(bcd)",
     "B₂": "λabcde.a(bcde)",
@@ -166,7 +166,10 @@ KNOWN_COMBINATORS = {
     "L": "λab.a(bb)",
     "M": "λa.aa",
     "M₂": "λab.ab(ab)",
+    "N": "λabcd.ac(bcd)",
+    "ν": "λabcd.b(acd)d",
     "O": "λab.b(ab)",
+    "P": "λabcd.a(bdc)(bcd)",
     "π": "λab.b",
     "Φ": "λabcd.a(bd)(cd)",
     "Φ₁": "λabcde.a(bde)(cde)",
@@ -180,6 +183,7 @@ KNOWN_COMBINATORS = {
     "R*": "λabcd.acdb",
     "R**": "λabcde.abdec",
     "S": "λabc.ac(bc)",
+    "Σ": "λabc.b(ac)c",
     "T": "λab.ba",
     "U": "λab.b(aab)",
     "V": "λabc.cab",
@@ -604,7 +608,7 @@ def parse_paren(s: str, ctx: dict[str, Var]) -> tuple[Obj, str]:
         if s[end] == ")":
             if depth == 0:
                 res = parse_top(s[start:end], ctx)
-                return res, s[end + 1:]
+                return res, s[end + 1 :]
             depth -= 1
         if s[end] == "(":
             depth += 1
@@ -987,7 +991,7 @@ def check() -> int:
         ("B Φ Φ", "Φ₁"),
         ("B (Φ B S) K K", "C"),
         ("B(S Φ C B)B", "Ψ"),
-        ("λx.NotX x", "NotX"),
+        ("λx.notX x", "notX"),
         ("B B C", "G"),
         ("E T T E T", "F"),
         ("B W (B C)", "H"),
